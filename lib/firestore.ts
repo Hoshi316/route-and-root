@@ -1,6 +1,7 @@
 import { addDoc, collection, doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "./firebase";
 import { RouteDoc } from "@/types/route";
+import { LogDoc } from "@/types/log";
 
 export async function saveRoute(route: RouteDoc) {
   const docRef = await addDoc(collection(db, "routes"), route);
@@ -33,4 +34,9 @@ export async function updateStepDone(
     steps,
     progress,
   });
+}
+
+export async function saveLog(log: LogDoc) {
+  const docRef = await addDoc(collection(db, "logs"), log);
+  return docRef.id;
 }
