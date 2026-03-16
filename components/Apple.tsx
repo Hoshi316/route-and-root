@@ -1,37 +1,27 @@
 // components/Apple.tsx
-"use client";
-
-type AppleProps = {
-  variety: 'sun' | 'moon' | 'midnight' | 'forest';
-  size: number;
+type Props = {
+  variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
+  moodScore: number; // 1〜5
 };
 
-export default function Apple({ variety, size }: AppleProps) {
-  // 品種ごとのデザイン設定
-  const design = {
-    sun: { color: "bg-red-500", shadow: "shadow-red-200", effect: "animate-pulse" },
-    moon: { color: "bg-slate-300", shadow: "shadow-blue-100", effect: "" },
-    midnight: { color: "bg-indigo-900", shadow: "shadow-indigo-400", effect: "brightness-110" },
-    forest: { color: "bg-emerald-500", shadow: "shadow-green-200", effect: "" },
-  }[variety];
+export default function Apple({ variety, moodScore }: Props) {
+  // 仕様書 8.1 のサイズ定義を適用
+  const sizeMap: Record<number, number> = {
+    1: 60,
+    2: 75,
+    3: 90,
+    4: 105,
+    5: 120
+  };
+
+  const size = sizeMap[moodScore] || 90;
 
   return (
-    <div className="flex flex-col items-center justify-center">
-      <div className={`
-        rounded-full relative transition-all duration-1000 shadow-2xl
-        ${design.color} ${design.shadow} ${design.effect}
-      `}
-      style={{ width: `${size}px`, height: `${size}px` }}>
-        {/* 光沢 */}
-        <div className="absolute top-1/4 left-1/4 w-1/4 h-1/4 bg-white/40 rounded-full blur-[1px]"></div>
-        
-        {/* 品種ごとの特別な装飾（例：midnightなら星のような点々） */}
-        {variety === 'midnight' && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-white text-[10px] opacity-50">✨</span>
-          </div>
-        )}
-      </div>
-    </div>
+    <img 
+      src={`/images/apple-${variety}.svg`} 
+      alt={variety} 
+      style={{ width: `${size}px`, height: 'auto' }}
+      className="drop-shadow-xl animate-bounce-slow"
+    />
   );
 }

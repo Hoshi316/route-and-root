@@ -4,7 +4,7 @@ import { LogDoc } from "@/types/log";
 
 export async function POST(req: Request) {
   try {
-    const { userId, routeId, moodScore, note } = await req.json();
+    const { userId, routeId, moodScore, note, variety, comment } = await req.json();
 
     if (!userId || !routeId || !moodScore) {
       return Response.json(
@@ -20,6 +20,7 @@ export async function POST(req: Request) {
       routeId,
       moodScore: Number(moodScore),
       note: note ?? "",
+      variety: variety || "forest",
       appleColor: apple.color,
       appleSize: apple.size,
       comment: apple.message,
