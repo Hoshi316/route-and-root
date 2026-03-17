@@ -18,12 +18,13 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   const [useMood, setUseMood] = useState(false); 
   const [mood, setMood] = useState(3);
   const [memo, setMemo] = useState("");
-  const [variety, setVariety] = useState<'sun' | 'moon' | 'midnight' | 'forest' | 'rare'>('forest');
   const [isWatering, setIsWatering] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [aiMessage, setAiMessage] = useState("");
-
+  const [pendingApples, setPendingApples] = useState<any[]>([]);
+  const [variety, setVariety] = useState<'sun' | 'moon' | 'midnight' | 'forest' | 'rare'>('forest');
+  
   // ログイン監視
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -54,13 +55,24 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
           note: memo.trim() || null 
         }),
       });
+
       const data = await response.json();
 
-      setNutrition(prev => Math.min(prev + 25, 100));
+      const newApple = {
+      variety: data.variety,
+      note: memo.trim() || "（メモなし）",
+      moodScore: useMood ? mood : null,
+      comment: data.message,
+      createdAt: new Date().toISOString()
+      };
+      
       setVariety(data.variety);
+      setPendingApples(prev => [...prev, newApple]);
+      setNutrition(prev => Math.min(prev + 25, 100));
       setAiMessage(data.message);
       setMemo(""); 
-      if (nutrition + 25 >= 60) setIsAdult(true);
+
+    
     } catch (error) {
       console.error("AI連携失敗:", error);
     } finally {
@@ -69,34 +81,33 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   };
 
   // 収穫
-  const handleHarvest = async () => {
-    if (!user) {
-      alert("ログインしていないため保存できません");
-      return;
-    }
-    setIsSaving(true);
-    try {
-      const response = await fetch("/api/save-log", {
+const handleHarvest = async () => {
+  if (!user || pendingApples.length === 0) return;
+
+  setIsSaving(true);
+  try {
+    // ★ 全てのリンゴをループで保存（Promise.allを使うと速いです）
+    await Promise.all(pendingApples.map(apple => 
+      fetch("/api/save-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: user.uid,
           routeId: routeId,
-          moodScore: useMood ? mood : null,
-          note: memo,
-          variety: variety, 
-          comment: aiMessage
+          ...apple // 溜めておいたリンゴの情報（variety, note, commentなど）
         }),
-      });
-      if (!response.ok) throw new Error("保存失敗");
-      setShowModal(true);
-    } catch (error) {
-      console.error(error);
-      alert("保存中にエラーが発生しました");
-    } finally {
-      setIsSaving(false);
-    }
-  };
+      })
+    ));
+
+    setShowModal(true);
+    setPendingApples([]); // 収穫したので空にする
+  } catch (error) {
+    console.error(error);
+    alert("保存中にエラーが発生しました");
+  } finally {
+    setIsSaving(false);
+  }
+};
 
   const handleCloseModal = () => {
     setShowModal(false);
@@ -194,7 +205,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
                   style={{ 
                     left: `${10 + i * 12}%`, 
                     top: '-20px', 
-                    animationDelay: `${i * 0.1}s`, // ★ ここ！s を外に出しました
+                    animationDelay: `${i * 0.1}s`,
                     animationDuration: '0.8s'
                   }}
                 >

@@ -1,10 +1,10 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { getUserLogs } from "@/lib/firestore";
 
-// 1. 型の定義（これをしっかり書くのが重要）
+// 1. 型の定義を強化（routeId と comment も追加）
 type AppleVariety = 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
 
 type AppleLog = {
@@ -13,30 +13,25 @@ type AppleLog = {
   note: string;
   moodScore: number;
   createdAt: string;
+  routeId: string; 
+  routeName?: string;
+  comment?: string; //  AIのメッセージも表示できるように追加
 };
 
 export default function CollectionPage() {
   const params = useParams();
   const userId = params?.userId as string; 
-  
   const searchParams = useSearchParams();
   const fromRouteId = searchParams.get("from") || "test";
 
-  // 2. Stateに型を付ける（any[] をやめる）
   const [apples, setApples] = useState<AppleLog[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!userId) {
-      console.log("🛠️ URLからIDを読み取り中...");
-      return;
-    }
-
+    if (!userId) return;
     async function loadApples() {
-      console.log("🚀 ID確定。データ取得開始:", userId);
       try {
         const data = await getUserLogs(userId);
-        // 3. 取得したデータを AppleLog型として扱う
         setApples(data as AppleLog[]);
       } catch (error) {
         console.error("❌ 取得エラー:", error);
@@ -44,19 +39,19 @@ export default function CollectionPage() {
         setLoading(false);
       }
     }
-
     loadApples();
   }, [userId]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (loading && !userId) {
-        console.error("❌ URLの解析に失敗しました。フォルダ名が [userId] になっているか確認してください。");
-        setLoading(false);
-      }
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, [loading, userId]);
+  // ★ 目標ごとにリンゴをグループ化する計算（useMemoで効率化）
+   const groupedApples = useMemo(() => {
+  return apples.reduce((acc, apple) => {
+    // 目標名があればそれを、なければIDを、それもなければ「不明」を表示
+    const key = apple.routeName || apple.routeId || "その他の目標";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(apple);
+    return acc;
+  }, {} as Record<string, AppleLog[]>);
+}, [apples]);
 
   const appleNames: Record<AppleVariety, string> = {
     sun: "サン・ルビー",
@@ -71,11 +66,7 @@ export default function CollectionPage() {
       <header className="max-w-4xl mx-auto mb-10 flex justify-between items-end">
         <div>
           <h1 className="text-4xl font-black text-orange-900 mb-2">リンゴ貯蔵庫</h1>
-          <p className="text-orange-600/70 font-bold">これまでの旅の結晶</p>
-         
-          <p className="text-[10px] bg-red-500 text-white p-1 mt-2">
-            検索用UID: {userId || "未取得"}
-          </p>
+          <p className="text-orange-600/70 font-bold">旅路ごとの結晶たち</p>
         </div>
         <div className="bg-white px-6 py-2 rounded-2xl shadow-sm border-2 border-orange-100">
           <span className="text-sm font-bold text-slate-400">合計</span>
@@ -87,37 +78,65 @@ export default function CollectionPage() {
         <div className="flex justify-center py-20">
           <div className="animate-spin h-10 w-10 border-4 border-orange-500 border-t-transparent rounded-full" />
         </div>
-      ) : apples.length === 0 ? (
+      ) : Object.keys(groupedApples).length === 0 ? (
         <div className="text-center py-20 bg-white rounded-[40px] border-4 border-dashed border-orange-100">
           <p className="text-slate-400 font-bold">まだリンゴがありません。農園で育ててみましょう！</p>
         </div>
       ) : (
-        <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-3 gap-6">
-          {apples.map((apple) => (
-            <div key={apple.id} className="bg-white p-6 rounded-[35px] shadow-xl border-2 border-orange-50 hover:scale-105 transition-transform group">
-              <div className="relative mb-4 flex justify-center items-center h-32">
-                <div className="absolute inset-0 bg-orange-50 rounded-full scale-0 group-hover:scale-100 transition-transform duration-500" />
-                <img 
-                  src={`/images/apple-${apple.variety}.svg`} 
-                  alt={apple.variety} 
-                  className="w-24 h-24 object-contain relative z-10 drop-shadow-lg"
-                />
-              </div>
-              <div className="text-center">
-                <span className="text-[10px] font-black text-orange-400 uppercase tracking-tighter block mb-1">
-                  {new Date(apple.createdAt).toLocaleDateString()}
+        <div className="max-w-4xl mx-auto space-y-12">
+          {/* ★ ルートごとにループを回す */}
+          {Object.entries(groupedApples).map(([routeName, routeApples]) => (
+            <section key={routeName} className="space-y-6">
+            <div className="flex items-center gap-3 border-b-2 border-orange-200 pb-2">
+            <span className="text-2xl">📍</span>
+            <h2 className="text-xl font-black text-orange-800">
+            目標: {routeName} {/* ★ ここが綺麗になる！ */}
+              </h2>
+   
+                <span className="text-xs font-bold bg-orange-200 text-orange-700 px-3 py-1 rounded-full">
+                  {routeApples.length}個
                 </span>
-                {/* 5. appleNames[apple.variety] の型エラーがこれで消えます */}
-                <h3 className="font-black text-slate-700 text-sm mb-2">{appleNames[apple.variety] || "未知のリンゴ"}</h3>
-                <p className="text-[11px] text-slate-400 line-clamp-2 bg-slate-50 p-2 rounded-xl">
-                  {apple.note || "（メモなし）"}
-                </p>
               </div>
-            </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                {routeApples.map((apple) => (
+                  <div key={apple.id} className="bg-white p-6 rounded-[35px] shadow-xl border-2 border-orange-50 hover:scale-105 transition-transform group relative overflow-hidden">
+                    {/* リンゴ表示 */}
+                    <div className="relative mb-4 flex justify-center items-center h-24">
+                      <img 
+                        src={`/images/apple-${apple.variety}.svg`} 
+                        alt={apple.variety} 
+                        className="w-20 h-20 object-contain relative z-10 drop-shadow-lg"
+                      />
+                    </div>
+                    
+                    <div className="text-center">
+                      <span className="text-[9px] font-black text-orange-400 uppercase block mb-1">
+                        {new Date(apple.createdAt).toLocaleDateString()}
+                      </span>
+                      <h3 className="font-black text-slate-700 text-sm mb-2">{appleNames[apple.variety] || "未知のリンゴ"}</h3>
+                      
+                      {/* メモの表示 */}
+                      <p className="text-[10px] text-slate-500 line-clamp-2 bg-orange-50/50 p-2 rounded-xl mb-2">
+                        {apple.note || "（メモなし）"}
+                      </p>
+
+                      {/* ★ Geminiのメッセージがあれば表示 */}
+                      {apple.comment && (
+                        <div className="text-[9px] text-orange-400 font-bold italic border-t border-orange-100 pt-2">
+                          「{apple.comment}」
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}
 
+      {/* フッターはそのまま */}
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
         <Link href={`/garden/${fromRouteId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
           <span className="text-2xl">🌳</span>
