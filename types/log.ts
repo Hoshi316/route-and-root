@@ -1,6 +1,7 @@
 export type LogDoc = {
   userId: string;
   routeId: string;
+  routeName: string;
   moodScore: number;
   note: string;
   appleColor: string;
