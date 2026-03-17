@@ -1,7 +1,9 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
 const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY!,
+  vertexai: true,
+  project: process.env.GOOGLE_CLOUD_PROJECT!,
+  location: "us-central1",
 });
 
 const stepSchema = {

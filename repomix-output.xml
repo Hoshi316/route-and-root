@@ -42,6 +42,8 @@ The content is organized as follows:
 <directory_structure>
 app/
   api/
+    generate-apple/
+      route.ts
     generate-plan/
       route.ts
     save-log/
@@ -51,7 +53,7 @@ app/
     update-steps/
       route.ts
   collection/
-    [routeId]/
+    [userId]/
       page.tsx
   garden/
     [routeId]/
@@ -102,127 +104,59 @@ tsconfig.json
 <files>
 This section contains the contents of the repository's files.
 
-<file path="app/api/generate-plan/route.ts">
-import { GoogleGenAI, Type } from "@google/genai";
+<file path="app/api/generate-apple/route.ts">
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY!,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
 export async function POST(req: Request) {
   try {
-    const { goal, durationDays, message } = await req.json();
+    const { moodScore, note } = await req.json();
 
-    if (!goal || !durationDays) {
-      return Response.json(
-        { error: "goal と durationDays は必須です" },
-        { status: 400 }
-      );
-    }
-
-    const prompt = `
-あなたは学習・目標達成を支援するプランナーです。
-以下の情報をもとに、現実的で短い達成プランを作ってください。
-
-目標: ${goal}
-期間(日): ${durationDays}
-メッセージ: ${message ?? ""}
-
-条件:
-- steps は 3〜7 個
-- 各 step は短く具体的に
-- scheduledDay は 1 以上 ${durationDays} 以下
-- 日本語で出力
-`;
-
-    const response = await ai.models.generateContent({
+    const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
+      generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
-            goal: {
-              type: Type.STRING,
+            variety: { 
+              type: SchemaType.STRING, 
+              enum: ["sun", "moon", "midnight", "forest", "rare"],
+              format: "string", // ★ これを追加！
             },
-            summary: {
-              type: Type.STRING,
-            },
-            steps: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  scheduledDay: { type: Type.INTEGER },
-                },
-                required: ["title", "description", "scheduledDay"],
-              },
+            message: { 
+              type: SchemaType.STRING,
+              format: "string", // ★ 念のためここにも追加しておくと安心です
             },
           },
-          required: ["goal", "summary", "steps"],
-        },
+          required: ["variety", "message"],
+        }as any,
       },
     });
 
-    const text = response.text;
-    const plan = JSON.parse(text);
+    const prompt = `
+      あなたは旅のガイドです。ユーザーの今の状態から、育つリンゴの品種を決めてください。
+      
+      【入力】
+      気分スコア: ${moodScore ?? "未指定"}
+      メモ: ${note ?? "未入力"}
 
-    return Response.json(plan);
+      【判定基準】
+      - ポジティブ、活動的なら "sun"
+      - 穏やか、リラックスなら "moon"
+      - 悩み、疲れ、内省的なら "midnight"
+      - 日常、フラットなら "forest"
+      - 非常に強い感情や珍しい体験なら "rare"
+      
+      同じ気分スコアが続いていても、メモの微妙なニュアンスから品種を変えても構いません。
+    `;
+
+    const result = await model.generateContent(prompt);
+    return Response.json(JSON.parse(result.response.text()));
   } catch (error) {
     console.error(error);
-    return Response.json(
-      { error: "プラン生成に失敗しました" },
-      { status: 500 }
-    );
-  }
-}
-</file>
-
-<file path="app/api/save-log/route.ts">
-import { saveLog } from "@/lib/firestore";
-import { getAppleStats } from "@/lib/apple";
-import { LogDoc } from "@/types/log";
-
-export async function POST(req: Request) {
-  try {
-    const { userId, routeId, moodScore, note } = await req.json();
-
-    if (!userId || !routeId || !moodScore) {
-      return Response.json(
-        { error: "userId, routeId, moodScore は必須です" },
-        { status: 400 }
-      );
-    }
-
-    const apple = getAppleStats(Number(moodScore));
-
-    const log: LogDoc = {
-      userId,
-      routeId,
-      moodScore: Number(moodScore),
-      note: note ?? "",
-      appleColor: apple.color,
-      appleSize: apple.size,
-      comment: apple.message,
-      createdAt: new Date().toISOString(),
-    };
-
-    const logId = await saveLog(log);
-
-    return Response.json({
-      success: true,
-      logId,
-      apple,
-    });
-  } catch (error) {
-    console.error(error);
-    return Response.json(
-      { error: "感情ログの保存に失敗しました" },
-      { status: 500 }
-    );
+    return Response.json({ variety: "forest", message: "一歩ずつ進みましょう。" });
   }
 }
 </file>
@@ -307,6 +241,145 @@ export async function POST(req: Request) {
 }
 </file>
 
+<file path="app/collection/[userId]/page.tsx">
+"use client";
+import { useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { getUserLogs } from "@/lib/firestore";
+
+// 1. 型の定義（これをしっかり書くのが重要）
+type AppleVariety = 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
+
+type AppleLog = {
+  id: string;
+  variety: AppleVariety;
+  note: string;
+  moodScore: number;
+  createdAt: string;
+};
+
+export default function CollectionPage() {
+  const params = useParams();
+  const userId = params?.userId as string; 
+  
+  const searchParams = useSearchParams();
+  const fromRouteId = searchParams.get("from") || "test";
+
+  // 2. Stateに型を付ける（any[] をやめる）
+  const [apples, setApples] = useState<AppleLog[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) {
+      console.log("🛠️ URLからIDを読み取り中...");
+      return;
+    }
+
+    async function loadApples() {
+      console.log("🚀 ID確定。データ取得開始:", userId);
+      try {
+        const data = await getUserLogs(userId);
+        // 3. 取得したデータを AppleLog型として扱う
+        setApples(data as AppleLog[]);
+      } catch (error) {
+        console.error("❌ 取得エラー:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadApples();
+  }, [userId]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (loading && !userId) {
+        console.error("❌ URLの解析に失敗しました。フォルダ名が [userId] になっているか確認してください。");
+        setLoading(false);
+      }
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [loading, userId]);
+
+  const appleNames: Record<AppleVariety, string> = {
+    sun: "サン・ルビー",
+    moon: "ムーン・シルバー",
+    forest: "フォレスト・ジェイド",
+    midnight: "ミッドナイト",
+    rare: "ゴールデン・ピピン"
+  };
+
+  return (
+    <div className="min-h-screen bg-orange-50 p-6 pb-32">
+      <header className="max-w-4xl mx-auto mb-10 flex justify-between items-end">
+        <div>
+          <h1 className="text-4xl font-black text-orange-900 mb-2">リンゴ貯蔵庫</h1>
+          <p className="text-orange-600/70 font-bold">これまでの旅の結晶</p>
+         
+          <p className="text-[10px] bg-red-500 text-white p-1 mt-2">
+            検索用UID: {userId || "未取得"}
+          </p>
+        </div>
+        <div className="bg-white px-6 py-2 rounded-2xl shadow-sm border-2 border-orange-100">
+          <span className="text-sm font-bold text-slate-400">合計</span>
+          <span className="ml-2 text-2xl font-black text-orange-500">{apples.length}</span>
+        </div>
+      </header>
+
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <div className="animate-spin h-10 w-10 border-4 border-orange-500 border-t-transparent rounded-full" />
+        </div>
+      ) : apples.length === 0 ? (
+        <div className="text-center py-20 bg-white rounded-[40px] border-4 border-dashed border-orange-100">
+          <p className="text-slate-400 font-bold">まだリンゴがありません。農園で育ててみましょう！</p>
+        </div>
+      ) : (
+        <div className="max-w-4xl mx-auto grid grid-cols-2 md:grid-cols-3 gap-6">
+          {apples.map((apple) => (
+            <div key={apple.id} className="bg-white p-6 rounded-[35px] shadow-xl border-2 border-orange-50 hover:scale-105 transition-transform group">
+              <div className="relative mb-4 flex justify-center items-center h-32">
+                <div className="absolute inset-0 bg-orange-50 rounded-full scale-0 group-hover:scale-100 transition-transform duration-500" />
+                <img 
+                  src={`/images/apple-${apple.variety}.svg`} 
+                  alt={apple.variety} 
+                  className="w-24 h-24 object-contain relative z-10 drop-shadow-lg"
+                />
+              </div>
+              <div className="text-center">
+                <span className="text-[10px] font-black text-orange-400 uppercase tracking-tighter block mb-1">
+                  {new Date(apple.createdAt).toLocaleDateString()}
+                </span>
+                {/* 5. appleNames[apple.variety] の型エラーがこれで消えます */}
+                <h3 className="font-black text-slate-700 text-sm mb-2">{appleNames[apple.variety] || "未知のリンゴ"}</h3>
+                <p className="text-[11px] text-slate-400 line-clamp-2 bg-slate-50 p-2 rounded-xl">
+                  {apple.note || "（メモなし）"}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
+        <Link href={`/garden/${fromRouteId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
+          <span className="text-2xl">🌳</span>
+          <span className="text-[10px] font-black text-slate-400">農園</span>
+        </Link>
+        <Link href={`/map/${fromRouteId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
+          <span className="text-2xl">🗺️</span>
+          <span className="text-[10px] font-black text-slate-400">マップ</span>
+        </Link>
+        <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center shadow-lg shadow-orange-200 cursor-default">
+          <span className="text-2xl text-white">📦</span>
+        </div>
+      </footer>
+    </div>
+  );
+}
+</file>
+
 <file path="app/globals.css">
 @import "tailwindcss";
 
@@ -369,82 +442,6 @@ export default function RootLayout({
         {children}
       </body>
     </html>
-  );
-}
-</file>
-
-<file path="components/Apple.tsx">
-// components/Apple.tsx
-"use client";
-
-type AppleProps = {
-  variety: 'sun' | 'moon' | 'midnight' | 'forest';
-  size: number;
-};
-
-export default function Apple({ variety, size }: AppleProps) {
-  // 品種ごとのデザイン設定
-  const design = {
-    sun: { color: "bg-red-500", shadow: "shadow-red-200", effect: "animate-pulse" },
-    moon: { color: "bg-slate-300", shadow: "shadow-blue-100", effect: "" },
-    midnight: { color: "bg-indigo-900", shadow: "shadow-indigo-400", effect: "brightness-110" },
-    forest: { color: "bg-emerald-500", shadow: "shadow-green-200", effect: "" },
-  }[variety];
-
-  return (
-    <div className="flex flex-col items-center justify-center">
-      <div className={`
-        rounded-full relative transition-all duration-1000 shadow-2xl
-        ${design.color} ${design.shadow} ${design.effect}
-      `}
-      style={{ width: `${size}px`, height: `${size}px` }}>
-        {/* 光沢 */}
-        <div className="absolute top-1/4 left-1/4 w-1/4 h-1/4 bg-white/40 rounded-full blur-[1px]"></div>
-        
-        {/* 品種ごとの特別な装飾（例：midnightなら星のような点々） */}
-        {variety === 'midnight' && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-white text-[10px] opacity-50">✨</span>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-</file>
-
-<file path="components/AppleTree.tsx">
-// components/AppleTree.tsx
-"use client";
-import Apple from "./Apple"; // 前回作ったリンゴパーツ
-
-type AppleTreeProps = {
-  level: number;    // 0:苗, 1:若木, 2:成木
-  variety: 'sun' | 'moon' | 'midnight' | 'forest'; // リンゴの種類
-  hasApple: boolean; // 実がついているかどうか
-};
-
-export default function AppleTree({ level, variety, hasApple }: AppleTreeProps) {
-  return (
-    <div className="relative flex flex-col items-center justify-center w-80 h-80">
-      {/* 木の見た目（レベル0〜2） */}
-      <div className="transition-all duration-1000 ease-out text-8xl">
-        {level === 0 && "🌱"}
-        {level === 1 && "🎋"}
-        {level >= 2 && "🌳"} 
-      </div>
-
-      {/* リンゴの実（レベル2以上かつ実がある時だけ表示） */}
-      {level >= 2 && hasApple && (
-        <div className="absolute top-12 animate-bounce">
-           {/* 前に作ったAppleコンポーネントを呼び出す */}
-           <Apple variety={variety} size={60} />
-        </div>
-      )}
-
-      {/* 地面 */}
-      <div className="mt-4 w-32 h-4 bg-orange-200/50 rounded-full blur-sm"></div>
-    </div>
   );
 }
 </file>
@@ -905,19 +902,6 @@ export async function exportToGoogleTasks(
 <svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 2.5h13v10a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1zM0 1h16v11.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 0 12.5zm3.75 4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5M7 4.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0m1.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5" fill="#666"/></svg>
 </file>
 
-<file path="types/log.ts">
-export type LogDoc = {
-  userId: string;
-  routeId: string;
-  moodScore: number;
-  note: string;
-  appleColor: string;
-  appleSize: number;
-  comment: string;
-  createdAt: string;
-};
-</file>
-
 <file path="types/route.ts">
 export type Step = {
   id: string;
@@ -1071,56 +1055,150 @@ export default config;
 }
 </file>
 
-<file path="app/collection/[routeId]/page.tsx">
-// app/collection/[routeId]/page.tsx
-//テスト
-"use client";
-import { useEffect, useState } from "react";
-import Apple from "@/components/Apple";
-import Link from "next/link";
+<file path="app/api/generate-plan/route.ts">
+import { GoogleGenAI, Type } from "@google/genai";
 
-export default function CollectionPage() {
-  const [apples, setApples] = useState<any[]>([]);
+const ai = new GoogleGenAI({
+  vertexai: true,
+  project: process.env.GOOGLE_CLOUD_PROJECT!,
+  location: "us-central1",
+});
 
-  useEffect(() => {
-    // 保存されたリンゴを読み込む
-    const saved = JSON.parse(localStorage.getItem("apple-collection") || "[]");
-    setApples(saved);
-  }, []);
+const stepSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title: { type: Type.STRING },
+    description: { type: Type.STRING },
+    scheduledDay: { type: Type.INTEGER },
+  },
+  required: ["title", "description", "scheduledDay"],
+};
 
-  return (
-    <div className="min-h-screen bg-stone-100 p-8">
-      <div className="max-w-4xl mx-auto">
-        <div className="flex justify-between items-center mb-12">
-          <h1 className="text-4xl font-black text-stone-800">🍎 リンゴ貯蔵庫</h1>
-          <Link href="/garden/test" className="text-stone-500 hover:underline">← 農園に戻る</Link>
-        </div>
+const planSchema = {
+  type: Type.OBJECT,
+  properties: {
+    style:          { type: Type.STRING },
+    styleLabel:     { type: Type.STRING },
+    styleEmoji:     { type: Type.STRING },
+    philosophy:     { type: Type.STRING },
+    tagline:        { type: Type.STRING },
+    suitableFor:    { type: Type.STRING },
+    tradeoff:       { type: Type.STRING },
+    intensityLevel: { type: Type.INTEGER },
+    // --- ここから追加 ---
+    recommendedDays: { type: Type.INTEGER }, // AIが提案する最適日数
+    daysComment:     { type: Type.STRING  }, // 期間についての一言
+    // --- ここまで追加 ---
+    goal:           { type: Type.STRING },
+    summary:        { type: Type.STRING },
+    steps:          { type: Type.ARRAY, items: stepSchema },
+  },
+  required: [
+    "style", "styleLabel", "styleEmoji",
+    "philosophy", "tagline", "suitableFor", "tradeoff",
+    "intensityLevel", 
+    "recommendedDays", "daysComment",
+    "goal", "summary", "steps",
+  ],
+};
 
-        {apples.length === 0 ? (
-          <div className="text-center py-20 bg-white rounded-3xl border-4 border-dashed border-stone-200">
-            <p className="text-stone-400 text-xl">まだ収穫されたリンゴはありません。<br/>農園で養分を注いでみましょう！</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {apples.map((apple) => (
-              <div key={apple.id} className="bg-white p-6 rounded-2xl shadow hover:shadow-xl transition-all group relative">
-                <Apple variety={apple.variety} size={80} />
-                <div className="mt-4 text-center">
-                  <p className="text-xs text-stone-400 font-mono">{apple.date}</p>
-                  <p className="text-sm font-bold text-stone-700 mt-1 truncate">{apple.variety.toUpperCase()}</p>
-                </div>
-                
-                {/* ホバーでメモを表示する簡易的な仕組み */}
-                <div className="absolute inset-0 bg-black/80 text-white p-4 text-xs rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center overflow-hidden">
-                  {apple.memo}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+export async function POST(req: Request) {
+  try {
+    const { goal, durationDays, message } = await req.json();
+
+    if (!goal || !durationDays) {
+      return Response.json(
+        { error: "goal と durationDays は必須です" },
+        { status: 400 }
+      );
+    }
+
+    const prompt = `
+あなたは目標達成を支援するプランナーです。
+以下の目標に対して、哲学が全く異なる3つのプランを作成してください。
+
+目標: ${goal}
+ユーザー希望期間(日): ${durationDays}
+メッセージ: ${message ?? "なし"}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+【プラン1】style: "full_throttle"
+styleLabel: "Full Throttle"
+styleEmoji: "⚡"
+philosophy: 速度と密度で圧倒する。今すぐ結果を出す。
+tagline: 最速で、限界の向こう側へ。
+
+期間ルール:
+- ユーザー希望期間を「上限」として扱う。
+- あなたが「本気を出せばこの日数でいける」と判断した最短日数を recommendedDays に設定する。
+- 最短は希望期間の3分の1まで許容（例：希望7日 → 最短2日）。
+- 各ステップに「何時間、何をやるか」を具体的に。
+- 禁止ワード：「無理せず」「少しずつ」「ゆっくり」
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+【プラン2】style: "wayfinder"
+styleLabel: "Wayfinder"
+styleEmoji: "🧭"
+philosophy: 納得と理解を積み重ねる。自分の地図を自分で描く。
+tagline: 正解より納得を。本物の力をつける旅。
+
+期間ルール:
+- ユーザー希望期間（${durationDays}日）をそのまま recommendedDays に設定する。
+- なぜこれをやるかの理由を各ステップに含める。
+- 理解を深める「深掘りステップ」を必ず1つ入れる。
+- 禁止ワード：「効率」「最短」「ショートカット」
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+【プラン3】style: "flow_state"
+styleLabel: "Flow State"
+styleEmoji: "🌊"
+philosophy: 毎日15分でも続く習慣に変換する。AIと道具を賢く使い、消耗しない。
+tagline: 頑張らずに、仕組みで進む。
+
+期間ルール:
+- ユーザー希望期間より長くして良い（最大1.5倍まで）。
+- 1日の負荷を最小にするために必要な日数を recommendedDays に設定する。
+- 必ず「AIツール・アプリ・自動化など、人間の努力を代替する賢いショートカット」を1ステップ以上含めること。
+- 禁止ワード：「集中して」「まとめて」「一気に」
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+出力ルール:
+- 3つのプランは明確に性格が違うこと
+- recommendedDays には各プランの哲学に基づいた最適日数を数値で入れること
+- daysComment には期間の根拠や励ましを1文で入れること
+- 日本語で出力
+- JSONのみを出力し、解説などは含めないこと
+`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            plans: {
+              type: Type.ARRAY,
+              items: planSchema,
+            },
+          },
+          required: ["plans"],
+        },
+      },
+    });
+
+    const text = response.text;
+    const data = JSON.parse(text);
+
+    return Response.json(data);
+  } catch (error) {
+    console.error(error);
+    return Response.json(
+      { error: "プラン生成に失敗しました" },
+      { status: 500 }
+    );
+  }
 }
 </file>
 
@@ -1164,6 +1242,153 @@ export default async function MapPage({ params }: PageProps) {
 }
 </file>
 
+<file path="components/Apple.tsx">
+// components/Apple.tsx
+type Props = {
+  variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
+  moodScore: number; // 1〜5
+};
+
+export default function Apple({ variety, moodScore }: Props) {
+  // 仕様書 8.1 のサイズ定義を適用
+  const sizeMap: Record<number, number> = {
+    1: 60,
+    2: 75,
+    3: 90,
+    4: 105,
+    5: 120
+  };
+
+  const size = sizeMap[moodScore] || 90;
+
+  return (
+    <img 
+      src={`/images/apple-${variety}.svg`} 
+      alt={variety} 
+      style={{ width: `${size}px`, height: 'auto' }}
+      className="drop-shadow-xl animate-bounce-slow"
+    />
+  );
+}
+</file>
+
+<file path="components/AppleTree.tsx">
+"use client";
+import Apple from "./Apple";
+import { useState, useEffect } from "react";
+
+type AppleTreeProps = {
+  level: number;
+  variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
+  hasApple: boolean;
+  moodScore: number;
+};
+
+export default function AppleTree({ level, variety, hasApple, moodScore }: AppleTreeProps) {
+  const [imgError, setImgError] = useState(false);
+  const treeImagePath = `/images/tree-${level}.svg`;
+
+  // レベルが変わったらエラー状態をリセットする
+  useEffect(() => {
+    setImgError(false);
+  }, [level]);
+
+  return (
+    <div className="relative flex flex-col items-center justify-center w-80 h-80">
+      {/* 木の見た目 */}
+      <div className="text-8xl flex items-center justify-center transition-all duration-500">
+        {!imgError ? (
+          <img 
+            src={treeImagePath} 
+            alt={`Tree Level ${level}`} 
+            className="w-64 h-64 object-contain"
+            onError={() => setImgError(true)} // 画像がない時にエラーを検知
+          />
+        ) : (
+          /* 画像がない時のバックアップ（絵文字） */
+          <div className="animate-pulse">
+            {level === 0 && "🌱"}
+            {level === 1 && "🎋"}
+            {level >= 2 && "🌳"}
+          </div>
+        )}
+      </div>
+
+      {/* リンゴの実 */}
+      {level >= 2 && hasApple && (
+        <div className="absolute top-12 animate-bounce">
+           <Apple variety={variety} moodScore={moodScore} />
+        </div>
+      )}
+
+      {/* 地面の影 */}
+      <div className="mt-4 w-32 h-4 bg-orange-200/50 rounded-full blur-sm"></div>
+    </div>
+  );
+}
+</file>
+
+<file path="types/log.ts">
+export type LogDoc = {
+  userId: string;
+  routeId: string;
+  moodScore: number;
+  note: string;
+  appleColor: string;
+  appleSize: number;
+  comment: string;
+  createdAt: string;
+  variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare'; // ★これを追加
+};
+</file>
+
+<file path="app/api/save-log/route.ts">
+import { saveLog } from "@/lib/firestore";
+import { getAppleStats } from "@/lib/apple";
+import { LogDoc } from "@/types/log";
+
+export async function POST(req: Request) {
+  try {
+    const { userId, routeId, moodScore, note, variety, comment } = await req.json();
+
+    if (!userId || !routeId || !moodScore) {
+      return Response.json(
+        { error: "userId, routeId, moodScore は必須です" },
+        { status: 400 }
+      );
+    }
+
+    const apple = getAppleStats(Number(moodScore));
+
+    const log: LogDoc = {
+      userId,
+      routeId,
+      moodScore: Number(moodScore),
+      note: note ?? "",
+      variety: variety || "forest",
+      appleColor: apple.color,
+      appleSize: apple.size,
+      comment: apple.message,
+      createdAt: new Date().toISOString(),
+    };
+
+    const logId = await saveLog(log);
+
+    return Response.json({
+      success: true,
+      logId,
+      apple,
+    });
+  } catch (error) {
+    console.error(error);
+    return Response.json(
+      { error: "感情ログの保存に失敗しました" },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
 <file path="components/MissionMap.tsx">
 "use client";
 
@@ -1200,6 +1425,38 @@ export default function MissionMap({
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const router = useRouter();
+  // stateに編集中のステップIDを追加
+const [editingStepId, setEditingStepId] = useState<string | null>(null);
+const [editTitle, setEditTitle] = useState("");
+const [editDescription, setEditDescription] = useState("");
+
+// 編集開始
+const handleEditStart = (step: Step) => {
+  setEditingStepId(step.id);
+  setEditTitle(step.title);
+  setEditDescription(step.description);
+};
+
+// 編集保存
+const handleEditSave = async (stepId: string) => {
+  const updatedSteps = localSteps.map((step) =>
+    step.id === stepId
+      ? { ...step, title: editTitle, description: editDescription }
+      : step
+  );
+  setLocalSteps(updatedSteps);
+  setEditingStepId(null);
+
+  try {
+    await fetch("/api/update-steps", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ routeId, steps: updatedSteps }),
+    });
+  } catch (error) {
+    console.error("編集の保存に失敗しました", error);
+  }
+};
 
   const currentProgress =
     localSteps.length === 0
@@ -1289,6 +1546,7 @@ export default function MissionMap({
         </div>
 
         <div className="space-y-4">
+          <div className="space-y-4">
           {localSteps.map((step) => (
             <div
               key={step.id}
@@ -1298,35 +1556,77 @@ export default function MissionMap({
                   : "border-orange-200 bg-white"
               }`}
             >
-              <div className="mb-2 flex items-start gap-3">
+              <div className="flex items-start gap-3">
                 <input
                   type="checkbox"
                   checked={step.done}
-                  disabled={loading}
+                  disabled={loading || editingStepId === step.id}
                   onChange={() => handleToggle(step.id)}
                   className="mt-1 h-5 w-5"
                 />
-                <div>
+                <div className="flex-1">
                   <p className="text-sm font-semibold text-orange-600">
                     Day {step.scheduledDay}
                   </p>
-                  <h3
-                    className={`text-lg font-bold ${
-                      step.done ? "line-through text-gray-500" : ""
-                    }`}
-                  >
-                    {step.title}
-                  </h3>
-                  <p className={step.done ? "text-gray-500" : "text-gray-700"}>
-                    {step.description}
-                  </p>
-                  <p className="mt-1 text-sm">
-                    状態: {step.done ? "完了" : "未完了"}
-                  </p>
+
+                  {editingStepId === step.id ? (
+                    // --- 編集モード：入力欄を表示 ---
+                    <div className="mt-1 space-y-2">
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        className="w-full rounded-lg border border-orange-300 p-2 text-sm font-bold focus:outline-none"
+                      />
+                      <textarea
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        className="w-full rounded-lg border border-orange-200 p-2 text-sm focus:outline-none"
+                        rows={2}
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEditSave(step.id)}
+                          className="rounded-lg bg-orange-500 px-3 py-1 text-sm font-bold text-white shadow-sm"
+                        >
+                          保存
+                        </button>
+                        <button
+                          onClick={() => setEditingStepId(null)}
+                          className="rounded-lg bg-gray-200 px-3 py-1 text-sm text-gray-600"
+                        >
+                          キャンセル
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // --- 表示モード：テキストを表示 ---
+                    <div className="mt-1">
+                      <h3
+                        className={`text-lg font-bold ${
+                          step.done ? "line-through text-gray-500" : ""
+                        }`}
+                      >
+                        {step.title}
+                      </h3>
+                      <p className={step.done ? "text-gray-500" : "text-gray-700"}>
+                        {step.description}
+                      </p>
+                      {!step.done && (
+                        <button
+                          onClick={() => handleEditStart(step)}
+                          className="mt-2 text-xs text-gray-400 underline hover:text-orange-500"
+                        >
+                          編集する
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           ))}
+        </div>
         </div>
 
         <div className="mt-8 flex flex-col items-center gap-4">
@@ -1352,16 +1652,38 @@ export default function MissionMap({
 </file>
 
 <file path="lib/firestore.ts">
-import { addDoc, collection, doc, getDoc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, updateDoc, setDoc } from "firebase/firestore"; // setDocを追加
 import { db } from "./firebase";
 import { RouteDoc } from "@/types/route";
 import { LogDoc } from "@/types/log";
+import { query, where, orderBy, getDocs } from "firebase/firestore"; // インポートを追加
 
+/**
+ * ユーザー情報を Firestore の users コレクションに保存する
+ * 仕様書の users/{uid} 設計に基づく
+ */
+export async function saveUser(user: { uid: string; displayName: string | null; email: string | null }) {
+  const userRef = doc(db, "users", user.uid);
+  
+  // UserDoc 型の定義に合わせてデータをセット
+  await setDoc(userRef, {
+    displayName: user.displayName || "匿名ユーザー",
+    email: user.email,
+    createdAt: new Date().toISOString(),
+  }, { merge: true }); // 既存のフィールドを保持しつつ更新・作成する設定
+}
+
+/**
+ * ルート（旅のしおり）を新規保存する
+ */
 export async function saveRoute(route: RouteDoc) {
-  const docRef = await addDoc(collection(db, "routes"), route);
+  const docRef = await addDoc(collection(db, "routes"), route); //
   return docRef.id;
 }
 
+/**
+ * 指定したルートの情報を取得する
+ */
 export async function getRoute(routeId: string) {
   const docRef = doc(db, "routes", routeId);
   const snap = await getDoc(docRef);
@@ -1373,6 +1695,9 @@ export async function getRoute(routeId: string) {
   return { id: snap.id, ...snap.data() };
 }
 
+/**
+ * ステップの完了状態を更新し、進捗率を再計算する
+ */
 export async function updateStepDone(
   routeId: string,
   steps: RouteDoc["steps"]
@@ -1384,15 +1709,33 @@ export async function updateStepDone(
           (steps.filter((step) => step.done).length / steps.length) * 100
         );
 
-  await updateDoc(doc(db, "routes", routeId), {
+  await updateDoc(doc(db, "routes", routeId), { //
     steps,
     progress,
   });
 }
 
+/**
+ * 感情ログ（リンゴの成長記録）を保存する
+ */
 export async function saveLog(log: LogDoc) {
-  const docRef = await addDoc(collection(db, "logs"), log);
+  const docRef = await addDoc(collection(db, "logs"), log); //
   return docRef.id;
+}
+
+export async function getUserLogs(userId: string) {
+  // queryの中から「orderBy」を一旦消します！
+  const q = query(
+    collection(db, "logs"),
+    where("userId", "==", userId)
+    // orderBy("createdAt", "desc") // ★ ここをコメントアウト！
+  );
+
+  const snap = await getDocs(q);
+  return snap.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  })) as any[];
 }
 </file>
 
@@ -1408,7 +1751,9 @@ export async function saveLog(log: LogDoc) {
     "lint": "eslint"
   },
   "dependencies": {
+    "@google-cloud/vertexai": "^1.10.0",
     "@google/genai": "^1.45.0",
+    "@google/generative-ai": "^0.24.1",
     "firebase": "^12.10.0",
     "next": "16.1.6",
     "react": "19.2.3",
@@ -1427,9 +1772,315 @@ export async function saveLog(log: LogDoc) {
 }
 </file>
 
-<file path="app/garden/[routeId]/page.tsx">
+<file path="app/page.tsx">
 "use client";
-import { useState, use } from "react"; 
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Header from "@/components/Header";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+
+type RawStep = {
+  title: string;
+  description: string;
+  scheduledDay: number;
+};
+
+type Plan = {
+  style: "full_throttle" | "wayfinder" | "flow_state";
+  styleLabel: string;
+  styleEmoji: string;
+  philosophy: string;
+  tagline: string;
+  suitableFor: string;
+  tradeoff: string;
+  intensityLevel: number;
+  goal: string;
+  summary: string;
+  steps: RawStep[];
+};
+
+const styleConfig = {
+  full_throttle: {
+    bg: "border-red-300 bg-red-50",
+    badge: "bg-red-100 text-red-700",
+    meter: "bg-red-400",
+    button: "bg-red-700 hover:bg-red-800",
+  },
+  wayfinder: {
+    bg: "border-blue-300 bg-blue-50",
+    badge: "bg-blue-100 text-blue-700",
+    meter: "bg-blue-400",
+    button: "bg-blue-700 hover:bg-blue-800",
+  },
+  flow_state: {
+    bg: "border-emerald-300 bg-emerald-50",
+    badge: "bg-emerald-100 text-emerald-700",
+    meter: "bg-emerald-400",
+    button: "bg-emerald-700 hover:bg-emerald-800",
+  },
+};
+
+
+
+export default function Home() {
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [goal, setGoal] = useState("");
+  const [durationDays, setDurationDays] = useState(7);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [plans, setPlans] = useState<Plan[] | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  // Step1: Geminiで3プラン生成
+  const handleGenerate = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError("");
+    setPlans(null);
+
+    try {
+      const res = await fetch("/api/generate-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal, durationDays, message }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "プラン生成に失敗しました");
+      setPlans(data.plans);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Step2: プランを選んでFirestoreに保存→遷移
+  const handleSelectPlan = async (plan: Plan) => {
+    if (!user) return;
+    setSaving(true);
+
+    try {
+      const saveRes = await fetch("/api/save-route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.uid,
+          goal: plan.goal,
+          durationDays,
+          message,
+          summary: plan.summary,
+          steps: plan.steps,
+        }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveRes.ok) throw new Error(saveData.error || "保存に失敗しました");
+      router.push(`/map/${saveData.routeId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存に失敗しました");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-amber-50 p-8 text-gray-800">
+      <div className="mx-auto max-w-3xl">
+        <h1 className="mb-2 text-4xl font-bold">Route & Root</h1>
+        <p className="mb-8 text-lg">目標を入力すると、AI が旅のしおりを作ってくれます。</p>
+        <Header />
+
+        {/* 入力フォーム（プラン未生成時のみ表示） */}
+        {!plans && (
+          <div className="mb-8 rounded-2xl bg-white p-6 shadow">
+            <div className="mb-4">
+              <label className="mb-2 block font-semibold">目標</label>
+              <input
+                type="text"
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 p-3"
+                placeholder="例：統計のテストに合格する"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="mb-2 block font-semibold">何日で達成したい？</label>
+              <input
+                type="number"
+                value={durationDays}
+                onChange={(e) => setDurationDays(Number(e.target.value))}
+                className="w-full rounded-lg border border-gray-300 p-3"
+              />
+            </div>
+            <div className="mb-4">
+              <label className="mb-2 block font-semibold">自分への一言</label>
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 p-3"
+                rows={3}
+              />
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={loading || !goal || !user}
+              className="rounded-xl bg-orange-500 px-6 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {loading ? "3つのプランを生成中..." : !user ? "ログインしてください" : "プランを見る"}
+            </button>
+            {error && <p className="mt-4 text-red-600">{error}</p>}
+          </div>
+        )}
+
+        {/* プラン選択カード */}
+        {plans && (
+          <div>
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-2xl font-bold">どのルートで旅しますか？</h2>
+              <button
+                onClick={() => setPlans(null)}
+                className="text-sm text-gray-500 underline"
+              >
+                ← 入力に戻る
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {plans.map((plan) => {
+  const config = styleConfig[plan.style];
+  return (
+    <div key={plan.style} className={`rounded-2xl border-2 p-6 ${config.bg}`}>
+
+      {/* ヘッダー：名前 + 気合度メーター */}
+      <div className="mb-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-3xl">{plan.styleEmoji}</span>
+          <span className={`rounded-full px-3 py-1 text-sm font-bold ${config.badge}`}>
+            {plan.styleLabel}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="mr-1 text-xs text-gray-400">気合度</span>
+          {[1, 2, 3, 4, 5].map((n) => (
+            <div
+              key={n}
+              className={`h-2 w-4 rounded-full transition-all ${
+                n <= plan.intensityLevel ? config.meter : "bg-gray-200"
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* 哲学 */}
+      <p className="mb-1 text-lg font-bold text-gray-800">
+        "{plan.philosophy}"
+      </p>
+
+      {/* キャッチコピー */}
+      <p className={`mb-4 text-sm font-semibold ${config.badge.split(" ")[1]}`}>
+        {plan.tagline}
+      </p>
+
+      {/* 期間バッジ */}
+{(() => {
+  const diff = plan.recommendedDays - durationDays;
+  const isShort  = diff < 0;
+  const isSame   = diff === 0;
+
+  return (
+    <div className="mb-4 flex items-center gap-3">
+      {/* 最適期間 */}
+      <div className={`rounded-xl px-4 py-2 text-center ${config.badge}`}>
+        <p className="text-xs font-semibold opacity-70">AI提案期間</p>
+        <p className="text-2xl font-black">{plan.recommendedDays}<span className="text-sm font-normal">日</span></p>
+      </div>
+
+      {/* 差分コメント */}
+      <div className="flex-1">
+        {isShort && (
+          <p className="text-sm font-bold text-red-600">
+            ⚡ 希望より{Math.abs(diff)}日短縮
+          </p>
+        )}
+        {isSame && (
+          <p className="text-sm font-bold text-blue-600">
+            🧭 希望通りの期間
+          </p>
+        )}
+        {!isShort && !isSame && (
+          <p className="text-sm font-bold text-emerald-600">
+            🌊 希望より{diff}日ゆとりを持たせます
+          </p>
+        )}
+        <p className="mt-1 text-xs text-gray-500 italic">
+          {plan.daysComment}
+        </p>
+      </div>
+    </div>
+  );
+})()}
+
+      {/* こんな人向け・トレードオフ */}
+      <div className="mb-4 space-y-1 rounded-xl bg-white/60 p-3 text-sm">
+        <p className="text-gray-600">
+          <span className="font-semibold">👤 向いている人：</span>
+          {plan.suitableFor}
+        </p>
+        <p className="text-gray-500 italic">
+          <span className="font-semibold not-italic">⚖️ トレードオフ：</span>
+          {plan.tradeoff}
+        </p>
+      </div>
+
+      {/* ステップ一覧（折りたたみ） */}
+      <details className="mb-4">
+        <summary className="cursor-pointer text-sm text-gray-400 hover:text-gray-600">
+          ステップを確認する（{plan.steps.length}個）
+        </summary>
+        <div className="mt-2 space-y-1 pl-2">
+          {plan.steps.map((step, i) => (
+            <p key={i} className="text-sm text-gray-600">
+              <span className="font-semibold">Day{step.scheduledDay}</span>{"　"}
+              {step.title}
+            </p>
+          ))}
+        </div>
+      </details>
+
+      <button
+        onClick={() => handleSelectPlan(plan)}
+        disabled={saving}
+        className={`w-full rounded-xl py-3 font-bold text-white transition ${config.button} disabled:opacity-50`}
+      >
+        {saving ? "準備中..." : "このルートで旅を始める →"}
+      </button>
+    </div>
+  );
+})}
+            </div>
+            {error && <p className="mt-4 text-red-600">{error}</p>}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/garden/[routeId]/page.tsx">
+"use client"; // 必ず1行目に書く
+
+import { useState, use, useEffect } from "react"; 
+import { auth } from "@/lib/firebase"; 
+import { onAuthStateChanged, User } from "firebase/auth";
 import AppleTree from "@/components/AppleTree";
 import HarvestModal from "@/components/HarvestModal";
 import Link from "next/link";
@@ -1437,72 +2088,89 @@ import Link from "next/link";
 export default function GardenPage({ params }: { params: Promise<{ routeId: string }> }) {
   const { routeId } = use(params);
 
-  // 状態管理
+  // 1. 状態管理
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
   const [nutrition, setNutrition] = useState(0);
   const [isAdult, setIsAdult] = useState(false); 
+  const [useMood, setUseMood] = useState(false); 
   const [mood, setMood] = useState(3);
   const [memo, setMemo] = useState("");
   const [variety, setVariety] = useState<'sun' | 'moon' | 'midnight' | 'forest' | 'rare'>('forest');
   const [isWatering, setIsWatering] = useState(false);
   const [showModal, setShowModal] = useState(false);
-  const [isSaving, setIsSaving] = useState(false); // ★ 保存中かどうかを管理
+  const [isSaving, setIsSaving] = useState(false);
+  const [aiMessage, setAiMessage] = useState("");
+
+  // ログイン監視
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const isFull = nutrition >= 100;
   let treeLevel = isAdult ? 2 : (nutrition < 30 ? 0 : nutrition < 60 ? 1 : 2);
 
-  const handleGiveNutrition = () => {
+  // 養分を注ぐ（Gemini連携）
+  const handleGiveNutrition = async () => {
+    const hasInput = useMood || (memo.trim().length > 0);
+    if (!hasInput) {
+      alert("やる気をONにするか、メモを入力してください🌱");
+      return;
+    }
+
     setIsWatering(true);
-    setTimeout(() => {
-      const boost = mood * 5 + (memo.length > 0 ? 10 : 0);
-      const newNutrition = Math.min(nutrition + boost, 100);
-      setNutrition(newNutrition);
+    try {
+      const response = await fetch("/api/generate-apple", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          moodScore: useMood ? mood : null, 
+          note: memo.trim() || null 
+        }),
+      });
+      const data = await response.json();
 
-      if (newNutrition >= 60) setIsAdult(true);
-
-      // 品種判定（小川さんのこだわりロジック）
-      if (Math.random() < 0.1) {
-        setVariety('rare');
-      } else {
-        if (mood >= 4) setVariety('sun');
-        else if (mood <= 2) setVariety('midnight');
-        else setVariety('forest');
-      }
+      setNutrition(prev => Math.min(prev + 25, 100));
+      setVariety(data.variety);
+      setAiMessage(data.message);
+      setMemo(""); 
+      if (nutrition + 25 >= 60) setIsAdult(true);
+    } catch (error) {
+      console.error("AI連携失敗:", error);
+    } finally {
       setIsWatering(false);
-    }, 1000);
+    }
   };
 
-  // ★ 収穫関数を星さんのAPIとガッチャンコ！
+  // 収穫
   const handleHarvest = async () => {
+    if (!user) {
+      alert("ログインしていないため保存できません");
+      return;
+    }
     setIsSaving(true);
-
     try {
-      // 星さんの /api/save-log にデータを送る
       const response = await fetch("/api/save-log", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: "user-1", // とりあえず固定
+          userId: user.uid,
           routeId: routeId,
-          moodScore: mood,
+          moodScore: useMood ? mood : null,
           note: memo,
-          // 星さん側のAPIにも「品種」を伝えておくと後で便利です
-          variety: variety 
+          variety: variety, 
+          comment: aiMessage
         }),
       });
-
-      if (!response.ok) throw new Error("保存に失敗しました");
-
-      // 保存に成功したら、小川さん自慢のポップアップを出す！
+      if (!response.ok) throw new Error("保存失敗");
       setShowModal(true);
     } catch (error) {
       console.error(error);
-      alert("クラウドへの保存に失敗しました。でもLocalStorageには残しますね！");
-      
-      // バックアップとして今まで通りLocalStorageにも保存
-      const newApple = { id: Date.now(), variety, memo, date: new Date().toLocaleDateString() };
-      const savedApples = JSON.parse(localStorage.getItem("apple-collection") || "[]");
-      localStorage.setItem("apple-collection", JSON.stringify([...savedApples, newApple]));
-      setShowModal(true);
+      alert("保存中にエラーが発生しました");
     } finally {
       setIsSaving(false);
     }
@@ -1512,180 +2180,151 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
     setShowModal(false);
     setNutrition(0); 
     setMemo("");
+    setAiMessage("");
+    setIsAdult(false);
   };
+
+  // アニメーション用のCSSを「コンポーネント」として定義（エラー回避のため）
+  const AnimationStyles = () => (
+    <style dangerouslySetInnerHTML={{ __html: `
+      @keyframes drop {
+        0% { transform: translateY(0); opacity: 0; }
+        30% { opacity: 1; }
+        100% { transform: translateY(350px); opacity: 0; }
+      }
+      .animate-drop {
+        display: inline-block;
+        animation: drop linear infinite;
+      }
+    `}} />
+  );
+
+  if (loading) return <div className="p-10 text-center font-bold">農園を準備中...</div>;
 
   return (
     <div className="min-h-screen bg-orange-50 p-6 pb-32 flex flex-col items-center">
       <header className="mb-8 text-center">
         <h1 className="text-3xl font-black text-orange-900">🍎 Route & Root 農園</h1>
-        <p className="text-orange-600/80 font-bold text-sm">ROUTE ID: {routeId}</p>
+        <p className="text-orange-600/80 font-bold">
+          {user ? `${user.displayName} さんの農園` : "ゲストの農園"}
+        </p>
+        <p className="text-xs text-orange-400 mt-1 uppercase tracking-widest">Route: {routeId}</p>
       </header>
 
       <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-10">
+        
         {/* 左側：入力エリア */}
         <div className="bg-white p-8 rounded-[40px] shadow-xl border-4 border-orange-100">
-          <h2 className="text-xl font-black text-slate-700 mb-6 flex items-center gap-2">📝 今日の養分</h2>
+          <h2 className="text-xl font-black text-slate-700 mb-6">📝 今日の養分</h2>
           <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-bold text-slate-400 mb-2">やる気レベル：{mood}</label>
-              <input type="range" min="1" max="5" value={mood} onChange={(e) => setMood(Number(e.target.value))} className="w-full accent-orange-500" />
-            </div>
-            <textarea className="w-full p-4 bg-orange-50/50 border-2 border-orange-100 rounded-2xl h-32 outline-none focus:border-orange-300 transition-colors" placeholder="今の気持ちをメモして養分にしよう..." value={memo} onChange={(e) => setMemo(e.target.value)} />
             
+            {/* やる気スライダー */}
+            <div className="bg-orange-50/50 p-4 rounded-2xl border-2 border-orange-100">
+              <div className="flex items-center justify-between mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    checked={useMood} 
+                    onChange={(e) => setUseMood(e.target.checked)}
+                    className="w-5 h-5 accent-orange-500"
+                  />
+                  <span className="font-bold text-slate-700">今日のやる気を伝える</span>
+                </label>
+                {useMood && <span className="text-orange-500 font-black px-2 py-1 bg-white rounded-lg shadow-sm text-sm">Lv.{mood}</span>}
+              </div>
+              <input 
+                type="range" min="1" max="5" value={mood} 
+                disabled={!useMood} 
+                onChange={(e) => setMood(Number(e.target.value))} 
+                className={`w-full ${useMood ? 'accent-orange-500' : 'opacity-30 cursor-not-allowed'}`} 
+              />
+            </div>
+
+            <textarea 
+              className="w-full p-4 bg-white border-2 border-orange-200 text-slate-900 font-bold rounded-2xl h-32 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition-all placeholder:text-slate-400"
+              placeholder="今の気持ちをメモ..." 
+              value={memo} 
+              onChange={(e) => setMemo(e.target.value)} 
+            />
+
             {isFull ? (
-              <button 
-                onClick={handleHarvest} 
-                disabled={isSaving}
-                className="w-full py-5 bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-black rounded-3xl shadow-lg animate-bounce text-lg disabled:opacity-50"
-              >
-                {isSaving ? "クラウドにセーブ中..." : "🍎 リンゴを収穫する！"}
+              <button onClick={handleHarvest} disabled={isSaving} className="w-full py-5 bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-black rounded-3xl shadow-lg animate-bounce disabled:opacity-50">
+                {isSaving ? "保存中..." : "🍎 リンゴを収穫する！"}
               </button>
             ) : (
-              <button onClick={handleGiveNutrition} disabled={isWatering} className="w-full py-5 bg-orange-500 text-white font-black rounded-3xl shadow-lg hover:bg-orange-600 active:scale-95 transition-all">
-                {isWatering ? "養分吸収中..." : "養分を注ぐ 💧"}
+              <button onClick={handleGiveNutrition} disabled={isWatering} className="w-full py-5 bg-orange-500 text-white font-black rounded-3xl shadow-lg hover:bg-orange-600 transition-all">
+                {isWatering ? "養分を吸収中..." : "養分を注ぐ 💧"}
               </button>
             )}
           </div>
         </div>
 
-        {/* 右側：表示エリア */}
-        <div className="flex flex-col items-center justify-center bg-white p-8 rounded-[40px] shadow-xl border-4 border-emerald-100 min-h-[480px]">
-          <AppleTree level={treeLevel} variety={variety === 'rare' ? 'sun' : variety} hasApple={isFull} />
+        {/* 右側：木が表示されるエリア */}
+        <div className="relative overflow-hidden flex flex-col items-center justify-center bg-white p-8 rounded-[40px] shadow-xl border-4 border-emerald-100 min-h-[480px]">
+          
+          {/* 💧 降り注ぐ演出 */}
+          {isWatering && (
+            <div className="absolute inset-0 pointer-events-none z-20">
+              {[...Array(8)].map((_, i) => (
+                <span 
+                  key={i} 
+                  className="absolute text-2xl animate-drop"
+                  style={{ 
+                    left: `${10 + i * 12}%`, 
+                    top: '-20px', 
+                    animationDelay: `${i * 0.1}s`, // ★ ここ！s を外に出しました
+                    animationDuration: '0.8s'
+                  }}
+                >
+                  💧
+                </span>
+              ))}
+            </div>
+          )}
+
+          <AppleTree 
+            level={treeLevel} 
+            variety={variety === 'rare' ? 'sun' : variety} 
+            hasApple={isFull} 
+            moodScore={useMood ? mood : 3} 
+          />
+
           <div className="mt-8 w-full max-w-xs text-center">
             <div className="flex justify-between text-xs font-black text-emerald-700 mb-2 uppercase tracking-widest">
               <span>Growth</span>
               <span>{nutrition}%</span>
             </div>
             <div className="w-full bg-slate-100 h-4 rounded-full overflow-hidden border-2 border-emerald-50">
-              <div className="bg-emerald-500 h-full transition-all duration-1000 ease-out" style={{ width: `${nutrition}%` }} />
+              <div className="bg-emerald-500 h-full transition-all duration-1000" style={{ width: `${nutrition}%` }} />
             </div>
           </div>
+
+          {aiMessage && (
+            <div className="mt-6 p-4 bg-orange-50 border-2 border-orange-200 rounded-2xl shadow-sm relative animate-in fade-in zoom-in duration-300">
+              <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-orange-50 border-t-2 border-l-2 border-orange-200 rotate-45"></div>
+              <p className="text-[10px] font-black text-orange-400 uppercase mb-1 text-center">園主の言葉</p>
+              <p className="text-sm text-slate-700 font-bold italic text-center">「{aiMessage}」</p>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* フッターナビゲーション */}
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
-        <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center shadow-lg shadow-orange-200 cursor-default">
-          <span className="text-2xl text-white">🍎</span>
-        </div>
-        <Link href={`/map/${routeId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
+        <Link href={`/map/${routeId}`} className="flex flex-col items-center gap-1">
           <span className="text-2xl">🗺️</span>
           <span className="text-[10px] font-black text-slate-400">マップ</span>
         </Link>
-        <Link href="/collection/user-1" className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
+        <Link href={`/collection/${user?.uid || 'guest'}?from=${routeId}`} className="flex flex-col items-center gap-1">
           <span className="text-2xl">📦</span>
           <span className="text-[10px] font-black text-slate-400">貯蔵庫</span>
         </Link>
       </footer>
 
       {showModal && <HarvestModal variety={variety} onClose={handleCloseModal} />}
+      
+      {/* ★ 修正したAnimationStylesをタグとして呼び出し */}
+      <AnimationStyles />
     </div>
-  );
-}
-</file>
-
-<file path="app/page.tsx">
-"use client";
-
-import { useState } from "react";
-import { useRouter } from "next/navigation"; // 案内役（ルーター）を呼びます
-import Header from "@/components/Header";
-import { useEffect } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
-import { auth } from "@/lib/firebase";
-
-export default function Home() {
-  const router = useRouter(); 
-  const [user, setUser] = useState<User | null>(null);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, []);
-  const [goal, setGoal] = useState("");
-  const [durationDays, setDurationDays] = useState(7);
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-
-  const handleGenerate = async () => {
-    if (!user) {
-      throw new Error("先にログインしてください");
-    }
-    setLoading(true);
-    setError("");
-
-    try {
-      // 1. Gemini AI にプランを作ってもらう
-      const res = await fetch("/api/generate-plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal, durationDays, message }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "プラン生成に失敗しました");
-
-      // 2. 作ってもらったプランを Firestore に保存する
-      const saveRes = await fetch("/api/save-route", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: user.uid,
-          goal,
-          durationDays,
-          message,
-          summary: data.summary,
-          steps: data.steps,
-        }),
-      });
-      const saveData = await saveRes.json();
-      if (!saveRes.ok) throw new Error(saveData.error || "保存に失敗しました");
-
-      // 3. 保存に成功したら、そのプラン専用のページへ移動する！
-      router.push(`/map/${saveData.routeId}`);
-
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "エラーが発生しました");
-      setLoading(false); // エラーの時だけ loading を解除します
-    }
-  };
-
-  return (
-    <main className="min-h-screen bg-amber-50 p-8 text-gray-800">
-      <div className="mx-auto max-w-3xl">
-
-        <h1 className="mb-2 text-4xl font-bold">Route & Root</h1>
-        <p className="mb-8 text-lg">目標を入力すると、AI が旅のしおりを作ってくれます。</p>
-        <Header />
-
-        <div className="mb-8 rounded-2xl bg-white p-6 shadow">
-          {/* 入力項目（ここは前と変わりません） */}
-          <div className="mb-4">
-            <label className="mb-2 block font-semibold">目標</label>
-            <input type="text" value={goal} onChange={(e) => setGoal(e.target.value)} className="w-full rounded-lg border border-gray-300 p-3" />
-          </div>
-          <div className="mb-4">
-            <label className="mb-2 block font-semibold">何日で達成したい？</label>
-            <input type="number" value={durationDays} onChange={(e) => setDurationDays(Number(e.target.value))} className="w-full rounded-lg border border-gray-300 p-3" />
-          </div>
-          <div className="mb-4">
-            <label className="mb-2 block font-semibold">自分への一言</label>
-            <textarea value={message} onChange={(e) => setMessage(e.target.value)} className="w-full rounded-lg border border-gray-300 p-3" rows={4} />
-          </div>
-
-          <button
-            onClick={handleGenerate}
-            disabled={loading || !goal || !user}
-            className="rounded-xl bg-orange-500 px-6 py-3 font-semibold text-white disabled:opacity-50"
-          >
-            {loading ? "生成中..." : !user ? "ログインしてください" : "旅を始める"}
-          </button>
-          {error && <p className="mt-4 text-red-600">{error}</p>}
-        </div>
-      </div>
-    </main>
   );
 }
 </file>

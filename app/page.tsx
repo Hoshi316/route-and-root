@@ -214,6 +214,45 @@ export default function Home() {
         {plan.tagline}
       </p>
 
+      {/* 期間バッジ */}
+{(() => {
+  const diff = plan.recommendedDays - durationDays;
+  const isShort  = diff < 0;
+  const isSame   = diff === 0;
+
+  return (
+    <div className="mb-4 flex items-center gap-3">
+      {/* 最適期間 */}
+      <div className={`rounded-xl px-4 py-2 text-center ${config.badge}`}>
+        <p className="text-xs font-semibold opacity-70">AI提案期間</p>
+        <p className="text-2xl font-black">{plan.recommendedDays}<span className="text-sm font-normal">日</span></p>
+      </div>
+
+      {/* 差分コメント */}
+      <div className="flex-1">
+        {isShort && (
+          <p className="text-sm font-bold text-red-600">
+            ⚡ 希望より{Math.abs(diff)}日短縮
+          </p>
+        )}
+        {isSame && (
+          <p className="text-sm font-bold text-blue-600">
+            🧭 希望通りの期間
+          </p>
+        )}
+        {!isShort && !isSame && (
+          <p className="text-sm font-bold text-emerald-600">
+            🌊 希望より{diff}日ゆとりを持たせます
+          </p>
+        )}
+        <p className="mt-1 text-xs text-gray-500 italic">
+          {plan.daysComment}
+        </p>
+      </div>
+    </div>
+  );
+})()}
+
       {/* こんな人向け・トレードオフ */}
       <div className="mb-4 space-y-1 rounded-xl bg-white/60 p-3 text-sm">
         <p className="text-gray-600">
