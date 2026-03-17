@@ -14,7 +14,6 @@ export default function Header() {
       setUser(currentUser);
       setLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
 
