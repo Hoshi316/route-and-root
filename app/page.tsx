@@ -5,18 +5,16 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { onAuthStateChanged, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { getActiveRoutes } from "@/lib/firestore";
+import { getActiveRoutes, getUserRouteSummary } from "@/lib/firestore";
 import { RouteDoc } from "@/types/route";
 import Link from "next/link";
 
-// ── 型定義 ──
 type RawStep = {
   title: string;
   description: string;
   scheduledDay: number;
 };
 
-// 編集可能なステップ（編集中フラグ付き）
 type EditableStep = RawStep & {
   _editing: boolean;
 };
@@ -37,9 +35,14 @@ type Plan = {
   steps: RawStep[];
 };
 
-// 編集可能なプラン
 type EditablePlan = Omit<Plan, "steps"> & {
   steps: EditableStep[];
+};
+
+type PlanResponse = {
+  plans: Plan[];
+  recommendedStyle: string;
+  recommendationMessage: string;
 };
 
 type RouteWithId = RouteDoc & { id: string };
@@ -77,10 +80,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  // plans を EditablePlan[] で管理
   const [editablePlans, setEditablePlans] = useState<EditablePlan[] | null>(null);
-
+  const [recommendedStyle, setRecommendedStyle] = useState<string>("");
+  const [recommendationMessage, setRecommendationMessage] = useState<string>("");
   const [activeRoutes, setActiveRoutes] = useState<RouteWithId[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
 
@@ -107,27 +109,27 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
-  // ── プラン生成 ──
   const handleGenerate = async () => {
     if (!user) return;
     setLoading(true);
     setError("");
     setEditablePlans(null);
     try {
+      const userHistory = await getUserRouteSummary(user.uid);
       const res = await fetch("/api/generate-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ goal, durationDays, message }),
+        body: JSON.stringify({ goal, durationDays, message, userHistory }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "プラン生成に失敗しました");
-
-      // RawStep → EditableStep に変換（_editing: false で初期化）
-      const editable: EditablePlan[] = data.plans.map((plan: Plan) => ({
+      const data: PlanResponse = await res.json();
+      if (!res.ok) throw new Error((data as any).error || "プラン生成に失敗しました");
+      const editable: EditablePlan[] = data.plans.map((plan) => ({
         ...plan,
         steps: plan.steps.map((step) => ({ ...step, _editing: false })),
       }));
       setEditablePlans(editable);
+      setRecommendedStyle(data.recommendedStyle);
+      setRecommendationMessage(data.recommendationMessage);
     } catch (err) {
       setError(err instanceof Error ? err.message : "エラーが発生しました");
     } finally {
@@ -135,7 +137,6 @@ export default function Home() {
     }
   };
 
-  // ── ステップ編集トグル ──
   const toggleEditStep = (planStyle: string, stepIndex: number) => {
     setEditablePlans((prev) =>
       prev
@@ -144,9 +145,7 @@ export default function Home() {
               ? {
                   ...plan,
                   steps: plan.steps.map((step, i) =>
-                    i === stepIndex
-                      ? { ...step, _editing: !step._editing }
-                      : step
+                    i === stepIndex ? { ...step, _editing: !step._editing } : step
                   ),
                 }
               : plan
@@ -155,7 +154,6 @@ export default function Home() {
     );
   };
 
-  // ── ステップフィールド更新 ──
   const updateStepField = (
     planStyle: string,
     stepIndex: number,
@@ -178,13 +176,10 @@ export default function Home() {
     );
   };
 
-  // ── プラン選択・保存 ──
-  // 編集済みの EditablePlan をそのまま送る
   const handleSelectPlan = async (plan: EditablePlan) => {
     if (!user) return;
     setSaving(true);
     try {
-      // _editing フラグを除いて送る
       const cleanSteps = plan.steps.map(({ _editing, ...rest }) => rest);
       const saveRes = await fetch("/api/save-route", {
         method: "POST",
@@ -253,11 +248,7 @@ export default function Home() {
               disabled={loading || !goal || !user}
               className="rounded-xl bg-orange-500 px-6 py-3 font-semibold text-white disabled:opacity-50"
             >
-              {loading
-                ? "3つのプランを生成中..."
-                : !user
-                ? "ログインしてください"
-                : "プランを見る"}
+              {loading ? "3つのプランを生成中..." : !user ? "ログインしてください" : "プランを見る"}
             </button>
             {error && <p className="mt-4 text-red-600">{error}</p>}
           </div>
@@ -275,10 +266,7 @@ export default function Home() {
                 <h2 className="mb-4 flex items-center gap-2 font-bold text-gray-700">
                   <span>🗺️</span>
                   <span>あなたの旅</span>
-                  <Link
-                    href="/history"
-                    className="ml-auto text-xs font-normal text-orange-400 underline"
-                  >
+                  <Link href="/history" className="ml-auto text-xs font-normal text-orange-400 underline">
                     すべて見る
                   </Link>
                 </h2>
@@ -290,24 +278,16 @@ export default function Home() {
                       <div
                         key={route.id}
                         className={`rounded-xl border p-4 ${
-                          isActive
-                            ? "border-orange-200 bg-orange-50"
-                            : "border-gray-100 bg-gray-50"
+                          isActive ? "border-orange-200 bg-orange-50" : "border-gray-100 bg-gray-50"
                         }`}
                       >
                         <div className="mb-2 flex items-start gap-2">
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-xs font-bold text-white ${
-                                  isActive ? "bg-orange-400" : "bg-gray-300"
-                                }`}
-                              >
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-bold text-white ${isActive ? "bg-orange-400" : "bg-gray-300"}`}>
                                 {isActive ? "進行中" : "完了"}
                               </span>
-                              <p className="text-sm font-bold text-gray-800">
-                                {route.goal}
-                              </p>
+                              <p className="text-sm font-bold text-gray-800">{route.goal}</p>
                             </div>
                             <p className="mt-1 text-xs text-gray-400">
                               {completedCount}/{route.steps.length} ステップ完了　
@@ -322,16 +302,10 @@ export default function Home() {
                           />
                         </div>
                         <div className="flex gap-2">
-                          <Link
-                            href={`/map/${route.id}`}
-                            className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-orange-600"
-                          >
+                          <Link href={`/map/${route.id}`} className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-orange-600">
                             🗺️ マップへ
                           </Link>
-                          <Link
-                            href={`/garden/${route.id}`}
-                            className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-emerald-600"
-                          >
+                          <Link href={`/garden/${route.id}`} className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-emerald-600">
                             🍎 農園へ
                           </Link>
                         </div>
@@ -349,178 +323,116 @@ export default function Home() {
           <div>
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-2xl font-bold">どのルートで旅しますか？</h2>
-              <button
-                onClick={() => setEditablePlans(null)}
-                className="text-sm text-gray-500 underline"
-              >
+              <button onClick={() => setEditablePlans(null)} className="text-sm text-gray-500 underline">
                 ← 入力に戻る
               </button>
             </div>
+
+            {/* AIからの推薦メッセージ */}
+            {recommendationMessage && (
+              <div className="mb-6 rounded-2xl border-2 border-orange-200 bg-white p-5 shadow-sm">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="text-2xl">🤖</span>
+                  <span className="text-sm font-bold text-orange-600">AIコーチからのアドバイス</span>
+                </div>
+                <p className="text-sm leading-relaxed text-gray-700">{recommendationMessage}</p>
+              </div>
+            )}
 
             <div className="space-y-6">
               {editablePlans.map((plan) => {
                 const config = styleConfig[plan.style];
                 const diff = plan.recommendedDays - durationDays;
-
                 return (
-                  <div
-                    key={plan.style}
-                    className={`rounded-2xl border-2 p-6 ${config.bg}`}
-                  >
+                  <div key={plan.style} className={`rounded-2xl border-2 p-6 ${config.bg}`}>
+
                     {/* ヘッダー */}
                     <div className="mb-4 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-3xl">{plan.styleEmoji}</span>
                         <span className={`rounded-full px-3 py-1 text-sm font-bold ${config.badge}`}>
                           {plan.styleLabel}
                         </span>
+                        {plan.style === recommendedStyle && (
+                          <span className="rounded-full bg-yellow-400 px-3 py-1 text-xs font-black text-yellow-900 shadow-sm">
+                            ✦ Most Suitable
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-1">
                         <span className="mr-1 text-xs text-gray-400">気合度</span>
                         {[1, 2, 3, 4, 5].map((n) => (
-                          <div
-                            key={n}
-                            className={`h-2 w-4 rounded-full ${
-                              n <= plan.intensityLevel ? config.meter : "bg-gray-200"
-                            }`}
-                          />
+                          <div key={n} className={`h-2 w-4 rounded-full ${n <= plan.intensityLevel ? config.meter : "bg-gray-200"}`} />
                         ))}
                       </div>
                     </div>
 
                     {/* 哲学・タグライン */}
-                    <p className="mb-1 text-lg font-bold text-gray-800">
-                      "{plan.philosophy}"
-                    </p>
-                    <p className={`mb-4 text-sm font-semibold ${config.badge.split(" ")[1]}`}>
-                      {plan.tagline}
-                    </p>
+                    <p className="mb-1 text-lg font-bold text-gray-800">"{plan.philosophy}"</p>
+                    <p className={`mb-4 text-sm font-semibold ${config.badge.split(" ")[1]}`}>{plan.tagline}</p>
 
                     {/* 期間バッジ */}
                     <div className="mb-4 flex items-center gap-3">
                       <div className={`rounded-xl px-4 py-2 text-center ${config.badge}`}>
                         <p className="text-xs font-semibold opacity-70">AI提案期間</p>
-                        <p className="text-2xl font-black">
-                          {plan.recommendedDays}
-                          <span className="text-sm font-normal">日</span>
-                        </p>
+                        <p className="text-2xl font-black">{plan.recommendedDays}<span className="text-sm font-normal">日</span></p>
                       </div>
                       <div className="flex-1">
-                        {diff < 0 && (
-                          <p className="text-sm font-bold text-red-600">
-                            ⚡ 希望より{Math.abs(diff)}日短縮
-                          </p>
-                        )}
-                        {diff === 0 && (
-                          <p className="text-sm font-bold text-blue-600">
-                            🧭 希望通りの期間
-                          </p>
-                        )}
-                        {diff > 0 && (
-                          <p className="text-sm font-bold text-emerald-600">
-                            🌊 希望より{diff}日ゆとりを持たせます
-                          </p>
-                        )}
-                        <p className="mt-1 text-xs italic text-gray-500">
-                          {plan.daysComment}
-                        </p>
+                        {diff < 0 && <p className="text-sm font-bold text-red-600">⚡ 希望より{Math.abs(diff)}日短縮</p>}
+                        {diff === 0 && <p className="text-sm font-bold text-blue-600">🧭 希望通りの期間</p>}
+                        {diff > 0 && <p className="text-sm font-bold text-emerald-600">🌊 希望より{diff}日ゆとりを持たせます</p>}
+                        <p className="mt-1 text-xs italic text-gray-500">{plan.daysComment}</p>
                       </div>
                     </div>
 
                     {/* 向いている人・トレードオフ */}
                     <div className="mb-4 space-y-1 rounded-xl bg-white/60 p-3 text-sm">
-                      <p className="text-gray-600">
-                        <span className="font-semibold">👤 向いている人：</span>
-                        {plan.suitableFor}
-                      </p>
-                      <p className="italic text-gray-500">
-                        <span className="font-semibold not-italic">⚖️ トレードオフ：</span>
-                        {plan.tradeoff}
-                      </p>
+                      <p className="text-gray-600"><span className="font-semibold">👤 向いている人：</span>{plan.suitableFor}</p>
+                      <p className="italic text-gray-500"><span className="font-semibold not-italic">⚖️ トレードオフ：</span>{plan.tradeoff}</p>
                     </div>
 
-                    {/* ── ステップ一覧（プレ編集可能） ── */}
+                    {/* ステップ一覧（プレ編集可能） */}
                     <div className="mb-4 space-y-2">
-                      <p className="text-xs font-bold text-gray-500">
-                        ✏️ ステップを編集できます（保存前に調整可）
-                      </p>
-
+                      <p className="text-xs font-bold text-gray-500">✏️ ステップを編集できます（保存前に調整可）</p>
                       {plan.steps.map((step, stepIndex) => (
-                        <div
-                          key={stepIndex}
-                          className={`rounded-xl border p-3 ${config.editBg}`}
-                        >
+                        <div key={stepIndex} className={`rounded-xl border p-3 ${config.editBg}`}>
                           {step._editing ? (
-                            /* 編集モード */
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
-                                <span className="shrink-0 text-xs font-bold text-gray-500">
-                                  Day
-                                </span>
+                                <span className="shrink-0 text-xs font-bold text-gray-500">Day</span>
                                 <input
                                   type="number"
                                   value={step.scheduledDay}
                                   min={1}
                                   max={plan.recommendedDays}
-                                  onChange={(e) =>
-                                    updateStepField(
-                                      plan.style,
-                                      stepIndex,
-                                      "scheduledDay",
-                                      Number(e.target.value)
-                                    )
-                                  }
+                                  onChange={(e) => updateStepField(plan.style, stepIndex, "scheduledDay", Number(e.target.value))}
                                   className="w-16 rounded-lg border border-gray-300 bg-white p-1 text-center text-sm font-bold focus:outline-none"
                                 />
                               </div>
                               <input
                                 type="text"
                                 value={step.title}
-                                onChange={(e) =>
-                                  updateStepField(
-                                    plan.style,
-                                    stepIndex,
-                                    "title",
-                                    e.target.value
-                                  )
-                                }
+                                onChange={(e) => updateStepField(plan.style, stepIndex, "title", e.target.value)}
                                 className="w-full rounded-lg border border-gray-300 bg-white p-2 text-sm font-bold focus:outline-none"
                                 placeholder="ステップのタイトル"
                               />
                               <textarea
                                 value={step.description}
-                                onChange={(e) =>
-                                  updateStepField(
-                                    plan.style,
-                                    stepIndex,
-                                    "description",
-                                    e.target.value
-                                  )
-                                }
+                                onChange={(e) => updateStepField(plan.style, stepIndex, "description", e.target.value)}
                                 className="w-full rounded-lg border border-gray-300 bg-white p-2 text-xs focus:outline-none"
                                 rows={2}
                                 placeholder="ステップの説明"
                               />
-                              <button
-                                onClick={() => toggleEditStep(plan.style, stepIndex)}
-                                className="rounded-lg bg-gray-700 px-3 py-1 text-xs font-bold text-white"
-                              >
+                              <button onClick={() => toggleEditStep(plan.style, stepIndex)} className="rounded-lg bg-gray-700 px-3 py-1 text-xs font-bold text-white">
                                 確定
                               </button>
                             </div>
                           ) : (
-                            /* 表示モード */
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1">
-                                <p className="text-xs font-bold text-gray-400">
-                                  Day {step.scheduledDay}
-                                </p>
-                                <p className="text-sm font-bold text-gray-800">
-                                  {step.title}
-                                </p>
-                                <p className="text-xs text-gray-500">
-                                  {step.description}
-                                </p>
+                                <p className="text-xs font-bold text-gray-400">Day {step.scheduledDay}</p>
+                                <p className="text-sm font-bold text-gray-800">{step.title}</p>
+                                <p className="text-xs text-gray-500">{step.description}</p>
                               </div>
                               <button
                                 onClick={() => toggleEditStep(plan.style, stepIndex)}

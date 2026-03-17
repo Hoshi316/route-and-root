@@ -6,11 +6,44 @@ const ai = new GoogleGenAI({
   location: "us-central1",
 });
 
-// ... stepSchema, planSchema は既存のまま ...
+const stepSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title:        { type: Type.STRING },
+    description:  { type: Type.STRING },
+    scheduledDay: { type: Type.INTEGER },
+  },
+  required: ["title", "description", "scheduledDay"],
+};
+
+const planSchema = {
+  type: Type.OBJECT,
+  properties: {
+    style:           { type: Type.STRING },
+    styleLabel:      { type: Type.STRING },
+    styleEmoji:      { type: Type.STRING },
+    philosophy:      { type: Type.STRING },
+    tagline:         { type: Type.STRING },
+    suitableFor:     { type: Type.STRING },
+    tradeoff:        { type: Type.STRING },
+    intensityLevel:  { type: Type.INTEGER },
+    recommendedDays: { type: Type.INTEGER },
+    daysComment:     { type: Type.STRING },
+    goal:            { type: Type.STRING },
+    summary:         { type: Type.STRING },
+    steps:           { type: Type.ARRAY, items: stepSchema },
+  },
+  required: [
+    "style", "styleLabel", "styleEmoji",
+    "philosophy", "tagline", "suitableFor", "tradeoff",
+    "intensityLevel", "recommendedDays", "daysComment",
+    "goal", "summary", "steps",
+  ],
+};
 
 export async function POST(req: Request) {
   try {
-    const { goal, durationDays, message } = await req.json();
+    const { goal, durationDays, message, userHistory } = await req.json();
 
     if (!goal || !durationDays) {
       return Response.json(
@@ -24,84 +57,92 @@ export async function POST(req: Request) {
     try {
       const searchResponse = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents: `以下の目標を達成するための、現在（2025年）最も効果的・最新の学習方法、ツール、リソースをGoogle検索で調べてください。
-        
+        contents: `以下の目標を達成するための、現在最も効果的・最新の学習方法、ツール、リソースをGoogle検索で調べてください。
+
 目標: ${goal}
 
 以下の観点で調べてください：
-- 最新バージョンや最新トレンド
-- 現在最も推奨されているツールやサービス
+- 最新バージョンや最新トレンド（2024〜2025年）
+- 現在最も推奨されているツールやサービス名（具体的に）
 - 効率的な学習順序や方法論
-- 初心者〜中級者向けの具体的なリソース
+- 初心者〜中級者向けの具体的なリソース名やサイト名
 
-検索結果をもとに、重要な情報を200文字以内で日本語でまとめてください。`,
+検索結果をもとに、重要な情報を箇条書きで300文字以内で日本語でまとめてください。`,
         config: {
           tools: [{ googleSearch: {} }],
         },
       });
       searchContext = searchResponse.text ?? "";
     } catch (e) {
-      // 検索失敗してもプラン生成は続行
-      console.warn("Search grounding failed, continuing without it:", e);
+      console.warn("Search grounding skipped:", e);
     }
 
-    // ── Step2: 検索情報を注入してプラン生成 ──
+    // ── Step2: 3プラン生成 + おすすめ選定 ──
     const prompt = `
-あなたは目標達成を支援するプランナーです。
-以下の目標に対して、哲学が全く異なる3つのプランを作成してください。
+あなたは目標達成を支援する、ユーザーの専任コーチです。
+以下の情報をもとに、3つのプランを作成し、その中からユーザーに最適な1つを推薦してください。
 
 目標: ${goal}
 ユーザー希望期間(日): ${durationDays}
-メッセージ: ${message ?? "なし"}
+ユーザーのメッセージ: ${message || "なし"}
 
-${searchContext ? `【Google検索で得た最新情報】
+【ユーザーの過去の実績】
+${userHistory || "過去の旅の記録なし（初回ユーザー）"}
+
+${searchContext ? `【Google検索で得た最新情報 - ステップに反映すること】
 ${searchContext}
-上記の最新情報を必ずプランのステップに反映させてください。特にFlow Stateプランでは具体的なツール名を含めること。
 ` : ""}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 【プラン1】style: "full_throttle"
-styleLabel: "Full Throttle"
-styleEmoji: "⚡"
+styleLabel: "Full Throttle" / styleEmoji: "⚡"
 philosophy: 速度と密度で圧倒する。今すぐ結果を出す。
 tagline: 最速で、限界の向こう側へ。
-
-期間ルール:
-- ユーザー希望期間を「上限」として扱う
-- 最短は希望期間の3分の1まで許容
+- 希望期間を上限として最短日数を設定（最短は3分の1まで）
+- ステップ3〜4個・高密度
 - intensityLevel: 5
 - 禁止ワード：「無理せず」「少しずつ」「ゆっくり」
 
-━━━━━━━━━━━━━━━━━━━━━━━━━
 【プラン2】style: "wayfinder"
-styleLabel: "Wayfinder"
-styleEmoji: "🧭"
+styleLabel: "Wayfinder" / styleEmoji: "🧭"
 philosophy: 納得と理解を積み重ねる。自分の地図を自分で描く。
 tagline: 正解より納得を。本物の力をつける旅。
-
-期間ルール:
-- ユーザー希望期間（${durationDays}日）をそのまま recommendedDays に設定
+- 希望期間（${durationDays}日）そのまま使用
+- ステップ5〜7個・各ステップに理由を含める
 - intensityLevel: 3
 - 禁止ワード：「効率」「最短」「ショートカット」
 
-━━━━━━━━━━━━━━━━━━━━━━━━━
 【プラン3】style: "flow_state"
-styleLabel: "Flow State"
-styleEmoji: "🌊"
+styleLabel: "Flow State" / styleEmoji: "🌊"
 philosophy: 毎日15分でも続く習慣に変換する。AIと道具を賢く使い、消耗しない。
 tagline: 頑張らずに、仕組みで進む。
-
-期間ルール:
-- ユーザー希望期間より長くして良い（最大1.5倍まで）
-- 必ず具体的なツール・アプリ名を1ステップ以上に含めること
+- 希望期間の最大1.5倍まで延長可
+- 1日15〜30分の最小単位に分解
+- 具体的なツール名を2つ以上含める
 - intensityLevel: 2
 - 禁止ワード：「集中して」「まとめて」「一気に」
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+【おすすめの選定】
+上記3つのプランを作成した後、以下の観点でユーザーに最適な1つを選んでください：
+
+判断基準（優先度順）：
+1. ユーザーの過去の完遂率（低ければ負荷の軽いプランを推薦）
+2. ユーザーのメッセージのトーン（忙しそうならflow_state、やる気満々ならfull_throttle）
+3. 目標の性質（知識習得ならwayfinder、スキル習得ならfull_throttle）
+4. 初回ユーザーの場合はwayfinderを推薦
+
+recommendedStyle: "full_throttle" / "wayfinder" / "flow_state" のいずれか
+recommendationMessage: 推薦理由を「ユーザーの状況に寄り添った」温かい口調で2〜3文で。
+  過去データがある場合は必ずそれに言及すること。
+  例：「以前のFull Throttleでは3日目で失速されていましたね。今回はFlow Stateで
+  毎日小さく積み上げる方が、きっと最後まで走り切れると思います。」
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━
 出力ルール:
 - 3つのプランは明確に性格が違うこと
 - 日本語で出力
-- JSONのみを出力し、解説などは含めないこと
+- JSONのみを出力すること
 `;
 
     const response = await ai.models.generateContent({
@@ -113,8 +154,10 @@ tagline: 頑張らずに、仕組みで進む。
           type: Type.OBJECT,
           properties: {
             plans: { type: Type.ARRAY, items: planSchema },
+            recommendedStyle: { type: Type.STRING },
+            recommendationMessage: { type: Type.STRING },
           },
-          required: ["plans"],
+          required: ["plans", "recommendedStyle", "recommendationMessage"],
         },
       },
     });
@@ -125,6 +168,9 @@ tagline: 頑張らずに、仕組みで進む。
 
   } catch (error) {
     console.error(error);
-    return Response.json({ error: "プラン生成に失敗しました" }, { status: 500 });
+    return Response.json(
+      { error: "プラン生成に失敗しました" },
+      { status: 500 }
+    );
   }
 }

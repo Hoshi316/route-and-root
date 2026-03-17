@@ -1,8 +1,9 @@
-import { addDoc, collection, doc, getDoc, updateDoc, setDoc ,deleteDoc} from "firebase/firestore"; // setDocを追加
+import { addDoc, collection, doc, getDoc, updateDoc, setDoc ,deleteDoc} from "firebase/firestore";
 import { db } from "./firebase";
 import { RouteDoc } from "@/types/route";
 import { LogDoc } from "@/types/log";
-import { query, where, orderBy, getDocs } from "firebase/firestore"; // インポートを追加
+import { query, where, orderBy, getDocs } from "firebase/firestore";
+import { getActiveRoutes, getUserRouteSummary } from "@/lib/firestore";
 
 /**
  * ユーザー情報を Firestore の users コレクションに保存する
@@ -113,4 +114,32 @@ export async function getActiveRoutes(userId: string) {
     id: doc.id,
     ...(doc.data() as RouteDoc),
   }));
+}
+
+export async function getUserRouteSummary(userId: string): Promise<string> {
+  try {
+    const q = query(
+      collection(db, "routes"),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc")
+    );
+    const snap = await getDocs(q);
+    const routes = snap.docs.map((doc) => ({
+      ...(doc.data() as RouteDoc),
+    }));
+
+    if (routes.length === 0) return "過去の旅の記録なし（初回ユーザー）";
+
+    // トークン節約のため最大5件・要点だけ抽出
+    const summary = routes.slice(0, 5).map((r) => {
+      const total = r.steps.length;
+      const done = r.steps.filter((s) => s.done).length;
+      const rate = total === 0 ? 0 : Math.round((done / total) * 100);
+      return `・目標「${r.goal}」: 完遂率${rate}%（${done}/${total}ステップ完了）`;
+    }).join("\n");
+
+    return summary;
+  } catch {
+    return "過去データ取得失敗";
+  }
 }
