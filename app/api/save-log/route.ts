@@ -1,5 +1,5 @@
 import { saveLog } from "@/lib/firestore";
-import { getAppleStats } from "@/lib/apple";
+import { APPLE_COLORS, AppleVariety } from "@/lib/apple";
 import { LogDoc } from "@/types/log";
 
 export async function POST(req: Request) {
@@ -13,7 +13,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const apple = getAppleStats(Number(moodScore));
 
     const log: LogDoc = {
       userId,
@@ -21,9 +20,9 @@ export async function POST(req: Request) {
       moodScore: Number(moodScore),
       note: note ?? "",
       variety: variety || "forest",
-      appleColor: apple.color,
-      appleSize: apple.size,
-      comment: apple.message,
+      appleColor: APPLE_COLORS[variety as AppleVariety] || "#10b981",
+      appleSize: 100, // サイズは固定にするか、型定義から消してもOK
+      comment: comment || "",
       createdAt: new Date().toISOString(),
     };
 
@@ -32,7 +31,8 @@ export async function POST(req: Request) {
     return Response.json({
       success: true,
       logId,
-      apple,
+      variety: log.variety,
+      color: log.appleColor
     });
   } catch (error) {
     console.error(error);

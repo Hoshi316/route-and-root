@@ -1,4 +1,4 @@
-import { addDoc, collection, doc, getDoc, updateDoc, setDoc } from "firebase/firestore"; // setDocを追加
+import { addDoc, collection, doc, getDoc, updateDoc, setDoc ,deleteDoc} from "firebase/firestore"; // setDocを追加
 import { db } from "./firebase";
 import { RouteDoc } from "@/types/route";
 import { LogDoc } from "@/types/log";
@@ -95,4 +95,9 @@ export async function getUserRoutes(userId: string) {
     id: doc.id,
     ...(doc.data() as RouteDoc),
   }));
+}
+
+export async function deleteUserLog(logId: string) {
+  const logRef = doc(db, "logs", logId);
+  await deleteDoc(logRef);
 }
