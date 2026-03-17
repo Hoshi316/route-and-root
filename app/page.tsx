@@ -9,10 +9,16 @@ import { getActiveRoutes } from "@/lib/firestore";
 import { RouteDoc } from "@/types/route";
 import Link from "next/link";
 
+// ── 型定義 ──
 type RawStep = {
   title: string;
   description: string;
   scheduledDay: number;
+};
+
+// 編集可能なステップ（編集中フラグ付き）
+type EditableStep = RawStep & {
+  _editing: boolean;
 };
 
 type Plan = {
@@ -31,6 +37,11 @@ type Plan = {
   steps: RawStep[];
 };
 
+// 編集可能なプラン
+type EditablePlan = Omit<Plan, "steps"> & {
+  steps: EditableStep[];
+};
+
 type RouteWithId = RouteDoc & { id: string };
 
 const styleConfig = {
@@ -39,18 +50,21 @@ const styleConfig = {
     badge: "bg-red-100 text-red-700",
     meter: "bg-red-400",
     button: "bg-red-700 hover:bg-red-800",
+    editBg: "bg-red-50 border-red-200",
   },
   wayfinder: {
     bg: "border-blue-300 bg-blue-50",
     badge: "bg-blue-100 text-blue-700",
     meter: "bg-blue-400",
     button: "bg-blue-700 hover:bg-blue-800",
+    editBg: "bg-blue-50 border-blue-200",
   },
   flow_state: {
     bg: "border-emerald-300 bg-emerald-50",
     badge: "bg-emerald-100 text-emerald-700",
     meter: "bg-emerald-400",
     button: "bg-emerald-700 hover:bg-emerald-800",
+    editBg: "bg-emerald-50 border-emerald-200",
   },
 };
 
@@ -63,7 +77,10 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [plans, setPlans] = useState<Plan[] | null>(null);
+
+  // plans を EditablePlan[] で管理
+  const [editablePlans, setEditablePlans] = useState<EditablePlan[] | null>(null);
+
   const [activeRoutes, setActiveRoutes] = useState<RouteWithId[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
 
@@ -74,13 +91,12 @@ export default function Home() {
         setRoutesLoading(true);
         try {
           const routes = await getActiveRoutes(currentUser.uid);
-          // 進行中（progress < 100）を先に、完了済みを後に
           const sorted = routes.sort((a, b) => {
             if (a.progress < 100 && b.progress === 100) return -1;
             if (a.progress === 100 && b.progress < 100) return 1;
             return 0;
           });
-          setActiveRoutes(sorted.slice(0, 5)); // 最大5件
+          setActiveRoutes(sorted.slice(0, 5));
         } catch (e) {
           console.error(e);
         } finally {
@@ -91,11 +107,12 @@ export default function Home() {
     return () => unsubscribe();
   }, []);
 
+  // ── プラン生成 ──
   const handleGenerate = async () => {
     if (!user) return;
     setLoading(true);
     setError("");
-    setPlans(null);
+    setEditablePlans(null);
     try {
       const res = await fetch("/api/generate-plan", {
         method: "POST",
@@ -104,7 +121,13 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "プラン生成に失敗しました");
-      setPlans(data.plans);
+
+      // RawStep → EditableStep に変換（_editing: false で初期化）
+      const editable: EditablePlan[] = data.plans.map((plan: Plan) => ({
+        ...plan,
+        steps: plan.steps.map((step) => ({ ...step, _editing: false })),
+      }));
+      setEditablePlans(editable);
     } catch (err) {
       setError(err instanceof Error ? err.message : "エラーが発生しました");
     } finally {
@@ -112,10 +135,57 @@ export default function Home() {
     }
   };
 
-  const handleSelectPlan = async (plan: Plan) => {
+  // ── ステップ編集トグル ──
+  const toggleEditStep = (planStyle: string, stepIndex: number) => {
+    setEditablePlans((prev) =>
+      prev
+        ? prev.map((plan) =>
+            plan.style === planStyle
+              ? {
+                  ...plan,
+                  steps: plan.steps.map((step, i) =>
+                    i === stepIndex
+                      ? { ...step, _editing: !step._editing }
+                      : step
+                  ),
+                }
+              : plan
+          )
+        : prev
+    );
+  };
+
+  // ── ステップフィールド更新 ──
+  const updateStepField = (
+    planStyle: string,
+    stepIndex: number,
+    field: keyof RawStep,
+    value: string | number
+  ) => {
+    setEditablePlans((prev) =>
+      prev
+        ? prev.map((plan) =>
+            plan.style === planStyle
+              ? {
+                  ...plan,
+                  steps: plan.steps.map((step, i) =>
+                    i === stepIndex ? { ...step, [field]: value } : step
+                  ),
+                }
+              : plan
+          )
+        : prev
+    );
+  };
+
+  // ── プラン選択・保存 ──
+  // 編集済みの EditablePlan をそのまま送る
+  const handleSelectPlan = async (plan: EditablePlan) => {
     if (!user) return;
     setSaving(true);
     try {
+      // _editing フラグを除いて送る
+      const cleanSteps = plan.steps.map(({ _editing, ...rest }) => rest);
       const saveRes = await fetch("/api/save-route", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -125,7 +195,7 @@ export default function Home() {
           durationDays: plan.recommendedDays,
           message,
           summary: plan.summary,
-          steps: plan.steps,
+          steps: cleanSteps,
         }),
       });
       const saveData = await saveRes.json();
@@ -147,7 +217,7 @@ export default function Home() {
         <Header />
 
         {/* ── 新しい目標入力フォーム ── */}
-        {!plans && (
+        {!editablePlans && (
           <div className="rounded-2xl bg-white p-6 shadow">
             <h2 className="mb-4 font-bold text-gray-700">✦ 新しい旅を始める</h2>
             <div className="mb-4">
@@ -194,8 +264,8 @@ export default function Home() {
         )}
 
         {/* ── 進行中・過去のルート ── */}
-        {user && !plans && (
-          <div className="mb-8 mt-6">
+        {user && !editablePlans && (
+          <div className="mt-6">
             {routesLoading ? (
               <div className="flex justify-center py-6">
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-orange-400 border-t-transparent" />
@@ -212,13 +282,10 @@ export default function Home() {
                     すべて見る
                   </Link>
                 </h2>
-
                 <div className="space-y-3">
                   {activeRoutes.map((route) => {
                     const isActive = route.progress < 100;
-                    const completedCount = route.steps.filter(
-                      (s) => s.done
-                    ).length;
+                    const completedCount = route.steps.filter((s) => s.done).length;
                     return (
                       <div
                         key={route.id}
@@ -228,49 +295,42 @@ export default function Home() {
                             : "border-gray-100 bg-gray-50"
                         }`}
                       >
-                        <div className="mb-2 flex items-start justify-between gap-2">
+                        <div className="mb-2 flex items-start gap-2">
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
-                              {isActive && (
-                                <span className="rounded-full bg-orange-400 px-2 py-0.5 text-xs font-bold text-white">
-                                  進行中
-                                </span>
-                              )}
-                              {!isActive && (
-                                <span className="rounded-full bg-gray-300 px-2 py-0.5 text-xs font-bold text-white">
-                                  完了
-                                </span>
-                              )}
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-xs font-bold text-white ${
+                                  isActive ? "bg-orange-400" : "bg-gray-300"
+                                }`}
+                              >
+                                {isActive ? "進行中" : "完了"}
+                              </span>
                               <p className="text-sm font-bold text-gray-800">
                                 {route.goal}
                               </p>
                             </div>
                             <p className="mt-1 text-xs text-gray-400">
-                              {completedCount}/{route.steps.length} ステップ完了
-                              　{new Date(route.createdAt).toLocaleDateString("ja-JP")}
+                              {completedCount}/{route.steps.length} ステップ完了　
+                              {new Date(route.createdAt).toLocaleDateString("ja-JP")}
                             </p>
                           </div>
                         </div>
-
-                        {/* 進捗バー */}
                         <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
                           <div
                             className="h-full rounded-full bg-orange-400 transition-all"
                             style={{ width: `${route.progress}%` }}
                           />
                         </div>
-
-                        {/* ジャンプボタン */}
                         <div className="flex gap-2">
                           <Link
                             href={`/map/${route.id}`}
-                            className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white hover:bg-orange-600 transition"
+                            className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-orange-600"
                           >
                             🗺️ マップへ
                           </Link>
                           <Link
                             href={`/garden/${route.id}`}
-                            className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white hover:bg-emerald-600 transition"
+                            className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-emerald-600"
                           >
                             🍎 農園へ
                           </Link>
@@ -284,29 +344,30 @@ export default function Home() {
           </div>
         )}
 
-        
-
-        {/* ── プラン選択カード ── */}
-        {plans && (
+        {/* ── プラン選択・プレ編集カード ── */}
+        {editablePlans && (
           <div>
             <div className="mb-6 flex items-center justify-between">
               <h2 className="text-2xl font-bold">どのルートで旅しますか？</h2>
               <button
-                onClick={() => setPlans(null)}
+                onClick={() => setEditablePlans(null)}
                 className="text-sm text-gray-500 underline"
               >
                 ← 入力に戻る
               </button>
             </div>
-            <div className="space-y-4">
-              {plans.map((plan) => {
+
+            <div className="space-y-6">
+              {editablePlans.map((plan) => {
                 const config = styleConfig[plan.style];
                 const diff = plan.recommendedDays - durationDays;
+
                 return (
                   <div
                     key={plan.style}
                     className={`rounded-2xl border-2 p-6 ${config.bg}`}
                   >
+                    {/* ヘッダー */}
                     <div className="mb-4 flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="text-3xl">{plan.styleEmoji}</span>
@@ -326,12 +387,16 @@ export default function Home() {
                         ))}
                       </div>
                     </div>
+
+                    {/* 哲学・タグライン */}
                     <p className="mb-1 text-lg font-bold text-gray-800">
                       "{plan.philosophy}"
                     </p>
                     <p className={`mb-4 text-sm font-semibold ${config.badge.split(" ")[1]}`}>
                       {plan.tagline}
                     </p>
+
+                    {/* 期間バッジ */}
                     <div className="mb-4 flex items-center gap-3">
                       <div className={`rounded-xl px-4 py-2 text-center ${config.badge}`}>
                         <p className="text-xs font-semibold opacity-70">AI提案期間</p>
@@ -361,6 +426,8 @@ export default function Home() {
                         </p>
                       </div>
                     </div>
+
+                    {/* 向いている人・トレードオフ */}
                     <div className="mb-4 space-y-1 rounded-xl bg-white/60 p-3 text-sm">
                       <p className="text-gray-600">
                         <span className="font-semibold">👤 向いている人：</span>
@@ -371,22 +438,103 @@ export default function Home() {
                         {plan.tradeoff}
                       </p>
                     </div>
-                    <details className="mb-4">
-                      <summary className="cursor-pointer text-sm text-gray-400 hover:text-gray-600">
-                        ステップを確認する（{plan.steps.length}個）
-                      </summary>
-                      <div className="mt-2 space-y-1 pl-2">
-                        {plan.steps.map((step, i) => (
-                          <p key={i} className="text-sm text-gray-600">
-                            <span className="font-semibold">
-                              Day{step.scheduledDay}
-                            </span>
-                            {"　"}
-                            {step.title}
-                          </p>
-                        ))}
-                      </div>
-                    </details>
+
+                    {/* ── ステップ一覧（プレ編集可能） ── */}
+                    <div className="mb-4 space-y-2">
+                      <p className="text-xs font-bold text-gray-500">
+                        ✏️ ステップを編集できます（保存前に調整可）
+                      </p>
+
+                      {plan.steps.map((step, stepIndex) => (
+                        <div
+                          key={stepIndex}
+                          className={`rounded-xl border p-3 ${config.editBg}`}
+                        >
+                          {step._editing ? (
+                            /* 編集モード */
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="shrink-0 text-xs font-bold text-gray-500">
+                                  Day
+                                </span>
+                                <input
+                                  type="number"
+                                  value={step.scheduledDay}
+                                  min={1}
+                                  max={plan.recommendedDays}
+                                  onChange={(e) =>
+                                    updateStepField(
+                                      plan.style,
+                                      stepIndex,
+                                      "scheduledDay",
+                                      Number(e.target.value)
+                                    )
+                                  }
+                                  className="w-16 rounded-lg border border-gray-300 bg-white p-1 text-center text-sm font-bold focus:outline-none"
+                                />
+                              </div>
+                              <input
+                                type="text"
+                                value={step.title}
+                                onChange={(e) =>
+                                  updateStepField(
+                                    plan.style,
+                                    stepIndex,
+                                    "title",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full rounded-lg border border-gray-300 bg-white p-2 text-sm font-bold focus:outline-none"
+                                placeholder="ステップのタイトル"
+                              />
+                              <textarea
+                                value={step.description}
+                                onChange={(e) =>
+                                  updateStepField(
+                                    plan.style,
+                                    stepIndex,
+                                    "description",
+                                    e.target.value
+                                  )
+                                }
+                                className="w-full rounded-lg border border-gray-300 bg-white p-2 text-xs focus:outline-none"
+                                rows={2}
+                                placeholder="ステップの説明"
+                              />
+                              <button
+                                onClick={() => toggleEditStep(plan.style, stepIndex)}
+                                className="rounded-lg bg-gray-700 px-3 py-1 text-xs font-bold text-white"
+                              >
+                                確定
+                              </button>
+                            </div>
+                          ) : (
+                            /* 表示モード */
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1">
+                                <p className="text-xs font-bold text-gray-400">
+                                  Day {step.scheduledDay}
+                                </p>
+                                <p className="text-sm font-bold text-gray-800">
+                                  {step.title}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  {step.description}
+                                </p>
+                              </div>
+                              <button
+                                onClick={() => toggleEditStep(plan.style, stepIndex)}
+                                className="shrink-0 rounded-lg bg-white/80 px-2 py-1 text-xs text-gray-400 hover:text-gray-700 border border-gray-200"
+                              >
+                                ✏️ 編集
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 出発ボタン */}
                     <button
                       onClick={() => handleSelectPlan(plan)}
                       disabled={saving}
