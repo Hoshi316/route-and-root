@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, use, useEffect } from "react"; 
+import { useState, use, useEffect, useRef } from "react"; 
 import { auth } from "@/lib/firebase"; 
 import { onAuthStateChanged, User } from "firebase/auth";
 import AppleTree from "@/components/AppleTree";
 import HarvestModal from "@/components/HarvestModal";
 import Link from "next/link";
-// ★ lib/apple から共通定義を呼び出す
 import { AppleVariety, APPLE_NAMES, APPLE_COLORS } from "@/lib/apple"; 
 
 export default function GardenPage({ params }: { params: Promise<{ routeId: string }> }) {
@@ -16,7 +15,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [nutrition, setNutrition] = useState(0);
-  const [isAdult, setIsAdult] = useState(false); 
+  const [hasGrown, setHasGrown] = useState(false);
   const [useMood, setUseMood] = useState(false); 
   const [mood, setMood] = useState(3);
   const [memo, setMemo] = useState("");
@@ -27,293 +26,233 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   const [pendingApples, setPendingApples] = useState<any[]>([]);
   const [routeName, setRouteName] = useState("");
   const [variety, setVariety] = useState<AppleVariety>('forest');
-  
+
+  // マルチモーダル用
+  const [image, setImage] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null); // 音声認識用
+
   const pendingCount = pendingApples.length;
+  const isFull = nutrition >= 100;
 
-  // 2. ログイン & ルート情報取得
+  // 2. 音声認識のセットアップ（Web Speech API）
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setLoading(false);
-    });
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.lang = 'ja-JP';
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
 
+      recognitionRef.current.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        setMemo(prev => prev + transcript); // メモ欄に直接書き込む
+      };
+
+      recognitionRef.current.onerror = () => setIsRecording(false);
+      recognitionRef.current.onend = () => setIsRecording(false);
+    }
+  }, []);
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+    } else {
+      setIsRecording(true);
+      recognitionRef.current?.start();
+    }
+  };
+
+  // ... (ログイン・データ取得・自動保存のuseEffectなどは以前と同じ)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     async function fetchRoute() {
       try {
         const res = await fetch(`/api/get-route?routeId=${routeId}`);
         const data = await res.json();
         setRouteName(data.goal || "無題の目標");
-        
-        // ★ データベースに保存されていた値を復元する
-        if (data.nutrition !== undefined) setNutrition(data.nutrition);
-        if (data.pendingApples) setPendingApples(data.pendingApples);
-        if (data.variety) setVariety(data.variety);
-      } catch (e) {
-        console.error("ルート取得失敗:", e);
-      }
+        setHasGrown(data.hasGrown || false);
+        setNutrition(data.nutrition || 0);
+        setPendingApples(data.pendingApples || []);
+        setVariety(data.currentVariety || 'forest');
+      } catch (e) { console.error(e); } finally { setLoading(false); }
     }
-
     fetchRoute();
     return () => unsubscribe();
   }, [routeId]);
-  
-  
-  const saveProgress = async (newNutrition: number, newApples: any[], currentVariety: string) => {
+
+  const saveProgress = async (newN: number, newA: any[], curV: string, grown: boolean) => {
     try {
       await fetch("/api/update-route-progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          routeId,
-          nutrition: newNutrition,
-          pendingApples: newApples,
-          variety: currentVariety
-        }),
+        body: JSON.stringify({ routeId, nutrition: newN, pendingApples: newA, variety: curV, hasGrown: grown }),
       });
-    } catch (e) {
-      console.error("自動保存失敗:", e);
-    }
+    } catch (e) { console.error(e); }
   };
-  const isFull = nutrition >= 100;
-  let treeLevel = isAdult ? 2 : (nutrition < 30 ? 0 : nutrition < 60 ? 1 : 2);
 
-  // 3. 養分を注ぐ（Gemini連携）
   const handleGiveNutrition = async () => {
-    const hasInput = useMood || (memo.trim().length > 0);
-    if (!hasInput) {
-      alert("やる気をONにするか、メモを入力してください🌱");
-      return;
-    }
+    if (isFull) return;
+    const hasInput = useMood || memo.trim() || image;
+    if (!hasInput) return alert("今日の頑張りを見せてください🌱");
 
     setIsWatering(true);
     try {
       const response = await fetch("/api/generate-apple", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moodScore: useMood ? mood : null, note: memo.trim() || null }),
+        body: JSON.stringify({ moodScore: useMood ? mood : null, note: memo.trim(), image: image }),
       });
       const data = await response.json();
 
       const nextNutrition = Math.min(nutrition + 25, 100);
-      const nextApples = [...pendingApples, {
-        variety: data.variety,
-        note: memo.trim() || "（メモなし）",
-        moodScore: useMood ? mood : null,
-        comment: data.message,
-        createdAt: new Date().toISOString()
-      }];
-      
+      let nextApples = [...pendingApples];
+      const existingIndex = nextApples.findIndex(a => a.variety === data.variety);
+      const newNote = memo.trim() || (image ? "（写真で報告）" : "（養分を注いだ）");
+
+      if (existingIndex !== -1) {
+        nextApples[existingIndex] = {
+          ...nextApples[existingIndex],
+          note: nextApples[existingIndex].note + " | " + newNote,
+          comment: data.message,
+          createdAt: new Date().toISOString()
+        };
+      } else {
+        nextApples.push({ variety: data.variety, note: newNote, moodScore: useMood ? mood : null, comment: data.message, createdAt: new Date().toISOString() });
+      }
+
       setVariety(data.variety);
       setPendingApples(nextApples);
       setNutrition(nextNutrition);
+      const nextHasGrown = nextNutrition === 100 ? true : hasGrown;
+      setHasGrown(nextHasGrown);
       setAiMessage(data.message);
-      setMemo("");
-      saveProgress(nextNutrition, nextApples, data.variety);
-
-    } catch (error) {
-      console.error("AI連携失敗:", error);
-    } finally {
-      setIsWatering(false);
-    }
-  };
-
-  // 4. 収穫
-  const handleHarvest = async () => {
-  if (!user || pendingCount === 0) return;
-  setIsSaving(true);
-  console.log("保存する目標名:", routeName);
-  try {
-
-      await Promise.all(pendingApples.map(apple => 
-        fetch("/api/save-log", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: user.uid,
-            routeId: routeId,
-            routeName: routeName,
-            ...apple
-          }),
-        })
-      ));
-
-      setShowModal(true);
-     
-
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsSaving(false);
-    }
+      setMemo(""); setImage(null);
+      saveProgress(nextNutrition, nextApples, data.variety, nextHasGrown);
+    } finally { setIsWatering(false); }
   };
 
   const handleCloseModal = () => {
-  setShowModal(false);
-  setPendingApples([]); 
-  setNutrition(0);      
-  saveProgress(0, [], 'forest'); 
-  setAiMessage("");
-  setIsAdult(false);
+    setShowModal(false); setPendingApples([]); setNutrition(0); setAiMessage("");
+    saveProgress(0, [], variety, true); 
   };
 
-  const AnimationStyles = () => (
-    <style dangerouslySetInnerHTML={{ __html: `
-      @keyframes drop {
-        0% { transform: translateY(0); opacity: 0; }
-        30% { opacity: 1; }
-        100% { transform: translateY(350px); opacity: 0; }
-      }
-      .animate-drop {
-        display: inline-block;
-        animation: drop linear infinite;
-      }
-    `}} />
-  );
+  let treeLevel = hasGrown ? 2 : (nutrition < 30 ? 0 : nutrition < 60 ? 1 : 2);
 
   if (loading) return <div className="p-10 text-center font-bold">農園を準備中...</div>;
 
   return (
     <div className="min-h-screen bg-orange-50 p-6 pb-32 flex flex-col items-center">
       <header className="mb-8 text-center">
-        <h1 className="text-3xl font-black text-orange-900">
-          🍎 {routeName || "Route & Root"} 農園
-        </h1>
-        <p className="text-orange-600/80 font-bold">
-          {user ? `${user.displayName} さんの旅路` : "ゲストの農園"}
-        </p>
+        <h1 className="text-3xl font-black text-orange-900">🍎 {routeName} 農園</h1>
       </header>
 
       <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-10">
         
-        {/* 左側：入力エリア */}
-        <div className="bg-white p-8 rounded-[40px] shadow-xl border-4 border-orange-100">
-          <h2 className="text-xl font-black text-slate-700 mb-6 flex justify-between items-center">
-            <span>📝 今日の養分</span>
-            {pendingCount > 0 && (
-              <span className="text-[10px] bg-orange-500 text-white px-3 py-1 rounded-full animate-pulse">
-                実り待機中: {pendingCount}個
-              </span>
-            )}
-          </h2>
-          
-          <div className="space-y-6">
-            <div className="bg-orange-50/50 p-4 rounded-2xl border-2 border-orange-100">
-              <div className="flex items-center justify-between mb-4">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input 
-                    type="checkbox" 
-                    checked={useMood} 
-                    onChange={(e) => setUseMood(e.target.checked)}
-                    className="w-5 h-5 accent-orange-500"
-                  />
-                  <span className="font-bold text-slate-700 text-sm">やる気を伝える</span>
-                </label>
-                {useMood && <span className="text-orange-500 font-black px-2 py-1 bg-white rounded-lg shadow-sm text-xs">Lv.{mood}</span>}
-              </div>
-              <input 
-                type="range" min="1" max="5" value={mood} 
-                disabled={!useMood} 
-                onChange={(e) => setMood(Number(e.target.value))} 
-                className={`w-full ${useMood ? 'accent-orange-500' : 'opacity-30 cursor-not-allowed'}`} 
-              />
+        {/* 左側：入力エリア（複数同時入力可能UI） */}
+        <div className="bg-white p-8 rounded-[40px] shadow-xl border-4 border-orange-100 space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-black text-slate-700">📝 今日の養分</h2>
+            <div className="flex gap-2">
+              {/* 写真追加ボタン */}
+              <label className="cursor-pointer bg-orange-50 p-2 rounded-xl border border-orange-100 hover:bg-orange-100 transition-colors">
+                <span>📷</span>
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const r = new FileReader();
+                    r.onloadend = () => setImage(r.result as string);
+                    r.readAsDataURL(file);
+                  }
+                }} />
+              </label>
+              {/* 音声入力ボタン */}
+              <button 
+                onClick={toggleRecording}
+                className={`p-2 rounded-xl border transition-all ${isRecording ? 'bg-red-500 border-red-600 animate-pulse' : 'bg-orange-50 border-orange-100'}`}
+              >
+                <span>{isRecording ? '🛑' : '🎙️'}</span>
+              </button>
             </div>
+          </div>
 
+          {/* メモ入力（常に表示） */}
+          <div className="relative">
             <textarea 
-              className="w-full p-4 bg-white border-2 border-orange-200 text-slate-900 font-bold rounded-2xl h-32 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 transition-all placeholder:text-slate-400 text-sm"
-              placeholder="今の気持ちをメモ..." 
+              className="w-full p-4 bg-orange-50/20 border-2 border-orange-100 text-slate-900 font-bold rounded-2xl h-32 outline-none focus:border-orange-500 transition-all text-sm"
+              placeholder={isRecording ? "音声を聞き取っています..." : "写真の説明や頑張りをメモ..."}
               value={memo} 
               onChange={(e) => setMemo(e.target.value)} 
             />
-
-            {isFull ? (
-              <button onClick={handleHarvest} disabled={isSaving} className="w-full py-5 bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-black rounded-3xl shadow-lg animate-bounce disabled:opacity-50">
-                {isSaving ? "保存中..." : `🍎 ${pendingCount}個のリンゴを収穫する！`}
-              </button>
-            ) : (
-              <button 
-                onClick={handleGiveNutrition} 
-                disabled={isWatering} 
-                className="w-full py-5 text-white font-black rounded-3xl shadow-lg transition-all active:scale-95"
-                style={{ backgroundColor: APPLE_COLORS[variety] }} // 品種に合わせて色変更
-              >
-                {isWatering ? "吸収中..." : `養分を注ぐ （${APPLE_NAMES[variety]}が育つ！）💧`}
-              </button>
-            )}
+            {isRecording && <div className="absolute top-2 right-2 flex gap-1"><span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce"></span><span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce [animation-delay:0.2s]"></span></div>}
           </div>
-        </div>
 
-        {/* 右側：木が表示されるエリア */}
-        <div className="relative overflow-hidden flex flex-col items-center justify-center bg-white p-8 rounded-[40px] shadow-xl border-4 border-emerald-100 min-h-[480px]">
-          
-          {/* 💧 降り注ぐ演出（色を品種に連動） */}
-          {isWatering && (
-            <div className="absolute inset-0 pointer-events-none z-20">
-              {[...Array(8)].map((_, i) => (
-                <span 
-                  key={i} 
-                  className="absolute text-2xl animate-drop"
-                  style={{ 
-                    left: `${10 + i * 12}%`, 
-                    color: APPLE_COLORS[variety], 
-                    animationDelay: `${i * 0.1}s`,
-                    animationDuration: '0.8s'
-                  }}
-                >
-                  💧
-                </span>
-              ))}
+          {/* 画像プレビュー（ある時だけ表示） */}
+          {image && (
+            <div className="relative w-full h-32 rounded-2xl overflow-hidden border-2 border-orange-200">
+              <img src={image} className="w-full h-full object-cover" />
+              <button onClick={() => setImage(null)} className="absolute top-2 right-2 bg-black/50 text-white w-6 h-6 rounded-full text-xs">✕</button>
             </div>
           )}
 
-          <AppleTree 
-            level={treeLevel} 
-            variety={variety === 'rare' ? 'sun' : variety} 
-            hasApple={pendingCount > 0} 
-            moodScore={useMood ? mood : 3} 
-          />
-
-          <div className="mt-8 w-full max-w-xs text-center">
-            <div className="flex justify-between text-[10px] font-black mb-2 uppercase tracking-widest" style={{ color: APPLE_COLORS[variety] }}>
-              <span>Growth</span>
-              <span>{nutrition}%</span>
+          <div className="bg-orange-50/50 p-4 rounded-2xl border-2 border-orange-100">
+            <div className="flex items-center justify-between mb-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={useMood} onChange={(e) => setUseMood(e.target.checked)} className="w-5 h-5 accent-orange-500" />
+                <span className="font-bold text-slate-700 text-sm">やる気レバー</span>
+              </label>
+              {useMood && <span className="text-orange-500 font-black px-2 py-1 bg-white rounded-lg shadow-sm text-xs">Lv.{mood}</span>}
             </div>
-            <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden border-2 border-emerald-50">
-              <div 
-                className="h-full transition-all duration-1000" 
-                style={{ width: `${nutrition}%`, backgroundColor: APPLE_COLORS[variety] }} 
-              />
-            </div>
+            <input type="range" min="1" max="5" value={mood} disabled={!useMood} onChange={(e) => setMood(Number(e.target.value))} className={`w-full ${useMood ? 'accent-orange-500' : 'opacity-30'}`} />
           </div>
 
+          <button 
+            onClick={handleGiveNutrition} 
+            disabled={isWatering} 
+            className="w-full py-5 text-white font-black rounded-3xl shadow-lg transition-all active:scale-95" 
+            style={{ backgroundColor: APPLE_COLORS[variety] }}
+          >
+            {isWatering ? "吸収中..." : isFull ? `🍎 収穫可能です！` : `養分を注ぐ (${nutrition}%) 💧`}
+          </button>
+        </div>
+
+        {/* 右側：木のエフェクト（省略なし） */}
+        <div className="relative overflow-hidden flex flex-col items-center justify-center bg-white p-8 rounded-[40px] shadow-xl border-4 border-emerald-100 min-h-[480px]">
+          {isWatering && (
+            <div className="absolute inset-0 pointer-events-none z-20">
+              {[...Array(6)].map((_, i) => (
+                <span key={i} className="absolute text-2xl animate-drop" style={{ left: `${20 + i * 15}%`, color: APPLE_COLORS[variety], animationDelay: `${i * 0.1}s` }}>💧</span>
+              ))}
+            </div>
+          )}
+          <AppleTree level={treeLevel} variety={variety === 'rare' ? 'sun' : variety} hasApple={pendingCount > 0} moodScore={useMood ? mood : 3} />
+          <div className="mt-8 w-full max-w-xs text-center">
+            <div className="flex justify-between text-[10px] font-black mb-2 uppercase tracking-widest" style={{ color: APPLE_COLORS[variety] }}>
+              <span>Growth</span><span>{nutrition}%</span>
+            </div>
+            <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden border-2 border-emerald-50">
+              <div className="h-full transition-all duration-1000" style={{ width: `${nutrition}%`, backgroundColor: APPLE_COLORS[variety] }} />
+            </div>
+          </div>
           {aiMessage && (
-            <div className="mt-6 p-4 bg-orange-50 border-2 border-orange-200 rounded-2xl shadow-sm relative animate-in fade-in zoom-in duration-300 mx-4">
-              <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-orange-50 border-t-2 border-l-2 border-orange-200 rotate-45"></div>
+            <div className="mt-6 p-4 bg-orange-50 border-2 border-orange-200 rounded-2xl shadow-sm mx-4 animate-in zoom-in fade-in">
               <p className="text-[9px] font-black text-orange-400 uppercase mb-1 text-center">園主の言葉</p>
-              <p className="text-sm text-slate-700 font-bold italic text-center leading-relaxed">「{aiMessage}」</p>
+              <p className="text-sm text-slate-700 font-bold italic text-center">「{aiMessage}」</p>
             </div>
           )}
         </div>
       </div>
-
-      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
-        <Link href={`/map/${routeId}`} className="flex flex-col items-center gap-1 hover:opacity-70">
-          <span className="text-2xl">🗺️</span>
-          <span className="text-[10px] font-black text-slate-400">マップ</span>
-        </Link>
-        <Link href={`/collection/${user?.uid || 'guest'}?from=${routeId}`} className="flex flex-col items-center gap-1 hover:opacity-70">
-          <span className="text-2xl">📦</span>
-          <span className="text-[10px] font-black text-slate-400">貯蔵庫</span>
-        </Link>
-        <Link href="/history" className="flex flex-col items-center gap-1 hover:opacity-70">
-          <span className="text-2xl">📜</span>
-          <span className="text-[10px] font-black text-slate-400">履歴</span>
-        </Link>
+      
+      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl flex justify-around items-center z-40">
+        <Link href={`/map/${routeId}`} className="flex flex-col items-center gap-1">🗺️<span className="text-[10px] font-black text-slate-400">マップ</span></Link>
+        <Link href={`/collection/${user?.uid || 'guest'}?from=${routeId}`} className="flex flex-col items-center gap-1">📦<span className="text-[10px] font-black text-slate-400">貯蔵庫</span></Link>
+        <Link href="/history" className="flex flex-col items-center gap-1">📜<span className="text-[10px] font-black text-slate-400">履歴</span></Link>
       </footer>
-
-    {showModal && (
-    <HarvestModal 
-      apples={pendingApples} // variety ではなくリストを渡す
-      onClose={handleCloseModal} 
-      />)}
+      {showModal && <HarvestModal apples={pendingApples} onClose={handleCloseModal} />}
+      <style jsx global>{`@keyframes drop { 0% { transform: translateY(-50px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(300px); opacity: 0; } } .animate-drop { display: inline-block; animation: drop linear infinite; animation-duration: 0.8s; }`}</style>
     </div>
   );
 }

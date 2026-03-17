@@ -1,41 +1,77 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI, Type } from "@google/genai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
+// 他のAPI（generate-planなど）と同じ設定を使用
+const ai = new GoogleGenAI({
+  vertexai: true,
+  project: process.env.GOOGLE_CLOUD_PROJECT!,
+  location: "us-central1",
+});
 
 export async function POST(req: Request) {
   try {
-    const { moodScore, note } = await req.json();
+    const { moodScore, note, image } = await req.json();
 
-    // ★ 1. 品種をスコアで「絶対」に固定する
+    // 1. 品種をスコア(1-5)でガッチリ固定（データの整合性を守る）
     const varietyMap: Record<number, string> = {
-      1: 'forest',   // 低め
-      2: 'moon',     // 少し低
-      3: 'midnight', // 普通
-      4: 'sun',      // 高め
-      5: 'rare'      // 最高
+      1: 'forest',   // 静かな森（低め）
+      2: 'moon',     // 穏やかな月（少し低め）
+      3: 'midnight', // 真夜中の集中（普通）
+      4: 'sun',      // 太陽の情熱（高め）
+      5: 'rare'      // 黄金の果実（最高！）
     };
-    const fixedVariety = varietyMap[moodScore] || 'forest';
+    const fixedVariety = varietyMap[Number(moodScore)] || 'forest';
 
-    // ★ 2. AIには「メッセージだけ」を作らせる（JSON形式を指定しない方が速くて安定します）
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-    
-    const prompt = `あなたは不思議な農園のガイドです。
-      ユーザーの今の状態に合わせた、短く温かい「園主の言葉」を1つだけ作成してください。
-      気分レベル: ${moodScore}/5
-      メモ: ${note || "（なし）"}
-      ※15文字以内で、優しく語りかけてください。`;
+    // 2. AIへの入力パーツを組み立て
+    const prompt = `あなたは不思議な農園の園主です。
+ユーザーが「今日頑張ったこと」を報告してきました。
 
-    const result = await model.generateContent(prompt);
-    const aiMessage = result.response.text().trim();
+【入力情報】
+- やる気Lv: ${moodScore}/5
+- ユーザーのメモ: ${note || "（メモなし）"}
 
-    // ★ 3. 自分で組み立てて返す
+【あなたの仕事】
+1. 画像が送られてきている場合、その内容（本、ノート、プログラム、計算、運動など）を具体的に読み取ってください。
+2. ユーザーの努力を15文字以内で、温かく、かつ具体的に褒めてください。
+例（画像に数式がある場合）：「難しい計算、頑張ったね！」
+例（画像にコードがある場合）：「綺麗なコード、実りの予感だね」
+例（画像がない場合）：「一歩ずつの歩みが、栄養だよ」
+
+※「」や解説は不要です。メッセージのみを返してください。`;
+
+    const contentParts: any[] = [{ text: prompt }];
+
+    // ★ 画像（Base64形式）がある場合、Geminiが理解できる形式に変換して追加
+    if (image && image.includes(",")) {
+      const base64Data = image.split(",")[1]; // "data:image/jpeg;base64,..." のカンマ以降
+      const mimeType = image.split(";")[0].split(":")[1]; // mimeTypeの取得
+
+      contentParts.push({
+        inlineData: {
+          data: base64Data,
+          mimeType: mimeType || "image/jpeg",
+        },
+      });
+    }
+
+    // 3. Geminiを呼び出し（Vision機能を使用）
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash", // 画像解析が得意で高速なモデル
+      contents: [{ role: "user", parts: contentParts }],
+    });
+
+    const aiMessage = response.text?.trim() || "一歩ずつ進みましょう。";
+
+    // 4. フロントエンドが期待する形式で返却
     return Response.json({
       variety: fixedVariety,
       message: aiMessage
     });
 
   } catch (error) {
-    console.error(error);
-    return Response.json({ variety: "forest", message: "一歩ずついきましょう。" });
+    console.error("Gemini Multi-modal Error:", error);
+    return Response.json({ 
+      variety: "forest", 
+      message: "木が静かに成長を見守っています。" 
+    });
   }
 }
