@@ -129,7 +129,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
           body: JSON.stringify({
             userId: user.uid,
             routeId: routeId,
-            routeName: routeName || "無題の旅路",
+            routeName: routeName,
             ...apple
           }),
         })

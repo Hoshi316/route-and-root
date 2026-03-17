@@ -4,7 +4,7 @@ import { LogDoc } from "@/types/log";
 
 export async function POST(req: Request) {
   try {
-    const { userId, routeId, moodScore, note, variety, comment } = await req.json();
+    const { userId, routeId,routeName, moodScore, note, variety, comment ,createdAt} = await req.json();
 
     if (!userId || !routeId || !moodScore) {
       return Response.json(
@@ -20,6 +20,7 @@ export async function POST(req: Request) {
       moodScore: Number(moodScore),
       note: note ?? "",
       variety: variety || "forest",
+      routeName: routeName || "不明な旅路",
       appleColor: APPLE_COLORS[variety as AppleVariety] || "#10b981",
       appleSize: 100, // サイズは固定にするか、型定義から消してもOK
       comment: comment || "",
