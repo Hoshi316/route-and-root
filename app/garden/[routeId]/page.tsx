@@ -120,6 +120,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   const handleHarvest = async () => {
   if (!user || pendingCount === 0) return;
   setIsSaving(true);
+  console.log("保存する目標名:", routeName);
   try {
 
       await Promise.all(pendingApples.map(apple => 

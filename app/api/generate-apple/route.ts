@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
@@ -6,49 +6,36 @@ export async function POST(req: Request) {
   try {
     const { moodScore, note } = await req.json();
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: SchemaType.OBJECT,
-          properties: {
-            variety: { 
-              type: SchemaType.STRING, 
-              enum: ["sun", "moon", "midnight", "forest", "rare"],
-              format: "string", // ★ これを追加！
-            },
-            message: { 
-              type: SchemaType.STRING,
-              format: "string", // ★ 念のためここにも追加しておくと安心です
-            },
-          },
-          required: ["variety", "message"],
-        }as any,
-      },
-    });
+    // ★ 1. 品種をスコアで「絶対」に固定する
+    const varietyMap: Record<number, string> = {
+      1: 'forest',   // 低め
+      2: 'moon',     // 少し低
+      3: 'midnight', // 普通
+      4: 'sun',      // 高め
+      5: 'rare'      // 最高
+    };
+    const fixedVariety = varietyMap[moodScore] || 'forest';
 
-    const prompt = `
-      あなたは旅のガイドです。ユーザーの今の状態から、育つリンゴの品種を決めてください。
-      
-      【入力】
-      気分スコア: ${moodScore ?? "未指定"}
-      メモ: ${note ?? "未入力"}
-
-      【判定基準】
-      - ポジティブ、活動的なら "sun"
-      - 穏やか、リラックスなら "moon"
-      - 悩み、疲れ、内省的なら "midnight"
-      - 日常、フラットなら "forest"
-      - 非常に強い感情や珍しい体験なら "rare"
-      
-      同じ気分スコアが続いていても、メモの微妙なニュアンスから品種を変えても構いません。
-    `;
+    // ★ 2. AIには「メッセージだけ」を作らせる（JSON形式を指定しない方が速くて安定します）
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    
+    const prompt = `あなたは不思議な農園のガイドです。
+      ユーザーの今の状態に合わせた、短く温かい「園主の言葉」を1つだけ作成してください。
+      気分レベル: ${moodScore}/5
+      メモ: ${note || "（なし）"}
+      ※15文字以内で、優しく語りかけてください。`;
 
     const result = await model.generateContent(prompt);
-    return Response.json(JSON.parse(result.response.text()));
+    const aiMessage = result.response.text().trim();
+
+    // ★ 3. 自分で組み立てて返す
+    return Response.json({
+      variety: fixedVariety,
+      message: aiMessage
+    });
+
   } catch (error) {
     console.error(error);
-    return Response.json({ variety: "forest", message: "一歩ずつ進みましょう。" });
+    return Response.json({ variety: "forest", message: "一歩ずついきましょう。" });
   }
 }
