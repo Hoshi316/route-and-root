@@ -41,7 +41,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
       try {
         const res = await fetch(`/api/get-route?routeId=${routeId}`);
         const data = await res.json();
-        setRouteName(data.goal);
+        setRouteName(data.goal || "無題の目標");
         
         // ★ データベースに保存されていた値を復元する
         if (data.nutrition !== undefined) setNutrition(data.nutrition);
@@ -118,10 +118,10 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
 
   // 4. 収穫
   const handleHarvest = async () => {
-    if (!user || pendingCount === 0) return;
+  if (!user || pendingCount === 0) return;
+  setIsSaving(true);
+  try {
 
-    setIsSaving(true);
-    try {
       await Promise.all(pendingApples.map(apple => 
         fetch("/api/save-log", {
           method: "POST",
@@ -136,9 +136,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
       ));
 
       setShowModal(true);
-      setPendingApples([]);
-      setNutrition(0);
-      saveProgress(0, [], 'forest'); 
+     
 
     } catch (error) {
       console.error(error);
@@ -148,10 +146,12 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   };
 
   const handleCloseModal = () => {
-    setShowModal(false);
-    setNutrition(0); 
-    setAiMessage("");
-    setIsAdult(false);
+  setShowModal(false);
+  setPendingApples([]); 
+  setNutrition(0);      
+  saveProgress(0, [], 'forest'); 
+  setAiMessage("");
+  setIsAdult(false);
   };
 
   const AnimationStyles = () => (
@@ -234,7 +234,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
                 className="w-full py-5 text-white font-black rounded-3xl shadow-lg transition-all active:scale-95"
                 style={{ backgroundColor: APPLE_COLORS[variety] }} // 品種に合わせて色変更
               >
-                {isWatering ? "吸収中..." : `${APPLE_NAMES[variety]}を注ぐ 💧`}
+                {isWatering ? "吸収中..." : `養分を注ぐ （${APPLE_NAMES[variety]}が育つ！）💧`}
               </button>
             )}
           </div>
