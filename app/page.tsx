@@ -271,47 +271,61 @@ export default function Home() {
                   </Link>
                 </h2>
                 <div className="space-y-3">
-                  {activeRoutes.map((route) => {
-                    const isActive = route.progress < 100;
-                    const completedCount = route.steps.filter((s) => s.done).length;
-                    return (
-                      <div
-                        key={route.id}
-                        className={`rounded-xl border p-4 ${
-                          isActive ? "border-orange-200 bg-orange-50" : "border-gray-100 bg-gray-50"
-                        }`}
-                      >
-                        <div className="mb-2 flex items-start gap-2">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className={`rounded-full px-2 py-0.5 text-xs font-bold text-white ${isActive ? "bg-orange-400" : "bg-gray-300"}`}>
-                                {isActive ? "進行中" : "完了"}
-                              </span>
-                              <p className="text-sm font-bold text-gray-800">{route.goal}</p>
-                            </div>
-                            <p className="mt-1 text-xs text-gray-400">
-                              {completedCount}/{route.steps.length} ステップ完了　
-                              {new Date(route.createdAt).toLocaleDateString("ja-JP")}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="mb-3 h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
-                          <div
-                            className="h-full rounded-full bg-orange-400 transition-all"
-                            style={{ width: `${route.progress}%` }}
-                          />
-                        </div>
-                        <div className="flex gap-2">
-                          <Link href={`/map/${route.id}`} className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-orange-600">
-                            🗺️ マップへ
-                          </Link>
-                          <Link href={`/garden/${route.id}`} className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-emerald-600">
-                            🍎 農園へ
-                          </Link>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {/* ── 進行中の旅（カルーセル） ── */}
+{user && !editablePlans && activeRoutes.filter(r => r.progress < 100).length > 0 && (
+  <div className="mt-6">
+    <div className="mb-3 flex items-center justify-between">
+      <h2 className="font-bold text-gray-700">🚶 進行中の旅</h2>
+      <Link href="/history" className="text-xs text-orange-400 underline">
+        すべて見る →
+      </Link>
+    </div>
+
+    {/* 横スクロールカルーセル */}
+    <div className="flex gap-3 overflow-x-auto pb-2 -mx-2 px-2"
+      style={{ scrollSnapType: "x mandatory" }}
+    >
+      {activeRoutes
+        .filter(r => r.progress < 100)
+        .slice(0, 5)
+        .map((route) => {
+          const completedCount = route.steps.filter((s) => s.done).length;
+          return (
+            <div
+              key={route.id}
+              className="shrink-0 w-64 rounded-2xl border border-orange-200 bg-white p-4 shadow-sm"
+              style={{ scrollSnapAlign: "start" }}
+            >
+              <p className="mb-1 text-xs font-bold text-orange-400 truncate">{route.goal}</p>
+              <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className="h-full rounded-full bg-orange-400"
+                  style={{ width: `${route.progress}%` }}
+                />
+              </div>
+              <p className="mb-3 text-xs text-gray-400">
+                {completedCount}/{route.steps.length} ステップ　{route.progress}%
+              </p>
+              <div className="flex gap-2">
+                <Link
+                  href={`/map/${route.id}`}
+                  className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white"
+                >
+                  🗺️ マップ
+                </Link>
+                <Link
+                  href={`/garden/${route.id}`}
+                  className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white"
+                >
+                  🍎 農園
+                </Link>
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  </div>
+)}
                 </div>
               </div>
             ) : null}

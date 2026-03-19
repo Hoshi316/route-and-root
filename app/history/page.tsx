@@ -13,6 +13,7 @@ export default function HistoryPage() {
   const [user, setUser] = useState<User | null>(null);
   const [routes, setRoutes] = useState<RouteWithId[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"active" | "done">("active");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -29,6 +30,10 @@ export default function HistoryPage() {
     });
     return () => unsubscribe();
   }, []);
+
+  const filteredRoutes = routes.filter((r) =>
+    tab === "active" ? r.progress < 100 : r.progress === 100
+  );
 
   if (loading) {
     return (
@@ -51,7 +56,7 @@ export default function HistoryPage() {
       <div className="mx-auto max-w-2xl">
 
         {/* ヘッダー */}
-        <div className="mb-8 flex items-end justify-between">
+        <div className="mb-6 flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-black text-orange-900">📜 旅の記録</h1>
             <p className="mt-1 text-sm text-orange-600/70">これまでの目標一覧</p>
@@ -64,20 +69,63 @@ export default function HistoryPage() {
           </Link>
         </div>
 
+        {/* タブ */}
+        <div className="mb-6 flex gap-2">
+          <button
+            onClick={() => setTab("active")}
+            className={`rounded-full px-5 py-2 text-sm font-bold transition ${
+              tab === "active"
+                ? "bg-orange-500 text-white shadow-md"
+                : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            🚶 進行中
+            {routes.filter(r => r.progress < 100).length > 0 && (
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                tab === "active" ? "bg-white/30 text-white" : "bg-orange-100 text-orange-600"
+              }`}>
+                {routes.filter(r => r.progress < 100).length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab("done")}
+            className={`rounded-full px-5 py-2 text-sm font-bold transition ${
+              tab === "done"
+                ? "bg-emerald-500 text-white shadow-md"
+                : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            ✅ 完了
+            {routes.filter(r => r.progress === 100).length > 0 && (
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                tab === "done" ? "bg-white/30 text-white" : "bg-emerald-100 text-emerald-600"
+              }`}>
+                {routes.filter(r => r.progress === 100).length}
+              </span>
+            )}
+          </button>
+        </div>
+
         {/* ルート一覧 */}
-        {routes.length === 0 ? (
-          <div className="rounded-3xl border-4 border-dashed border-orange-100 bg-white py-20 text-center">
-            <p className="text-slate-400">まだ旅の記録がありません。</p>
-            <Link href="/" className="mt-4 inline-block font-bold text-orange-500 underline">
-              最初の旅を始める
-            </Link>
+        {filteredRoutes.length === 0 ? (
+          <div className="rounded-3xl border-4 border-dashed border-orange-100 bg-white py-16 text-center">
+            <p className="text-slate-400">
+              {tab === "active" ? "進行中の旅はありません。" : "完了した旅はまだありません。"}
+            </p>
+            {tab === "active" && (
+              <Link href="/" className="mt-4 inline-block font-bold text-orange-500 underline">
+                新しい旅を始める
+              </Link>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
-            {routes.map((route) => {
+            {filteredRoutes.map((route) => {
               const completedCount = route.steps.filter((s) => s.done).length;
               const totalCount = route.steps.length;
-              const progressPercent = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+              const progressPercent =
+                totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
               const isCompleted = progressPercent === 100;
               const createdDate = new Date(route.createdAt).toLocaleDateString("ja-JP");
 
@@ -127,19 +175,19 @@ export default function HistoryPage() {
                   <div className="flex gap-2">
                     <Link
                       href={`/map/${route.id}`}
-                      className="flex-1 rounded-xl bg-orange-500 py-2 text-center text-sm font-bold text-white hover:bg-orange-600 transition"
+                      className="flex-1 rounded-xl bg-orange-500 py-2 text-center text-sm font-bold text-white transition hover:bg-orange-600"
                     >
                       🗺️ マップを見る
                     </Link>
                     <Link
                       href={`/garden/${route.id}`}
-                      className="flex-1 rounded-xl bg-emerald-500 py-2 text-center text-sm font-bold text-white hover:bg-emerald-600 transition"
+                      className="flex-1 rounded-xl bg-emerald-500 py-2 text-center text-sm font-bold text-white transition hover:bg-emerald-600"
                     >
                       🍎 農園へ
                     </Link>
                     <Link
                       href={`/collection/${user.uid}?from=${route.id}`}
-                      className="flex-1 rounded-xl bg-slate-200 py-2 text-center text-sm font-bold text-slate-600 hover:bg-slate-300 transition"
+                      className="flex-1 rounded-xl bg-slate-200 py-2 text-center text-sm font-bold text-slate-600 transition hover:bg-slate-300"
                     >
                       📦 リンゴ
                     </Link>
