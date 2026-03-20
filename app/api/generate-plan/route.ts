@@ -16,6 +16,17 @@ const stepSchema = {
   required: ["title", "description", "scheduledDay"],
 };
 
+const phaseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title:          { type: Type.STRING, description: "フェーズ名（例：基礎固め）" },
+    startDay:       { type: Type.INTEGER },
+    endDay:         { type: Type.INTEGER },
+    description:    { type: Type.STRING, description: "このフェーズの目標を1文で" },
+  },
+  required: ["title", "startDay", "endDay", "description"],
+};
+
 const planSchema = {
   type: Type.OBJECT,
   properties: {
@@ -156,7 +167,14 @@ recommendationMessage: 推薦理由を「ユーザーの状況に寄り添った
 - steps.description: 40文字以内
 
 長い文章は必ず削れ。無駄な情報を削ぎ落とすことがこのプランナーの美学である。
-`;
+【フェーズ分割ルール】
+- 期間が14日以下：phases は1つ（全体を1フェーズ）
+- 期間が15〜60日：phases は2〜3つ
+- 期間が61日以上：phases は3〜5つ
+- 各フェーズにタイトルをつけること（例：「第1章：基礎固め」「第2章：実践編」）
+- フェーズのstartDayとendDayはstepsのscheduledDayと整合させること
+`
+;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",

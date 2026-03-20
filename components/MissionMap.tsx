@@ -14,12 +14,20 @@ type Step = {
   done: boolean;
 };
 
+type Phase = {
+  title: string;
+  startDay: number;
+  endDay: number;
+  description: string;
+};
+
 type Props = {
   routeId: string;
   goal: string;
   summary: string;
   progress: number;
   steps: Step[];
+  phases?: Phase[];
 };
 
 function StepCard({
@@ -84,7 +92,6 @@ function StepCard({
         transition: "opacity 0.4s ease, transform 0.4s ease",
       }}
     >
-      {/* 中央ノード */}
       <div className="absolute left-1/2 z-10 -translate-x-1/2">
         <div
           className="flex h-7 w-7 items-center justify-center rounded-full"
@@ -102,7 +109,6 @@ function StepCard({
         </div>
       </div>
 
-      {/* カード */}
       <div className={`w-[44%] ${isLeft ? "mr-auto pl-1" : "ml-auto pr-1"}`}>
         <div
           className={`rounded-2xl border p-4 transition-all duration-300 ${
@@ -144,8 +150,8 @@ function StepCard({
           ) : (
             <>
               <h3 className={`text-sm font-black leading-snug ${
-                  step.done ? "text-sky-400 line-through" : "text-sky-900"
-                }`}>
+                step.done ? "text-sky-400 line-through" : "text-sky-900"
+              }`}>
                 {step.title}
               </h3>
               <p className={`mt-1 text-xs leading-relaxed ${
@@ -180,7 +186,7 @@ function StepCard({
   );
 }
 
-export default function MissionMap({ routeId, goal, summary, progress, steps }: Props) {
+export default function MissionMap({ routeId, goal, summary, progress, steps, phases }: Props) {
   const [localSteps, setLocalSteps] = useState(steps);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -190,23 +196,41 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
   const headerRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [headerH, setHeaderH] = useState(160);
-  const [footerH, setFooterH] = useState(180);
+  const [headerH] = useState(160);
+  const [footerH] = useState(180);
   const router = useRouter();
-
-  // ヘッダー・フッターの高さを実測
-  useEffect(() => {
-  const el = scrollRef.current;
-  if (!el) return;
-  // 描画完了後に一番下へ
-  const timer = setTimeout(() => {
-    el.scrollTop = el.scrollHeight;
-  }, 100);
-  return () => clearTimeout(timer);
-}, []);
 
   const sortedAsc = [...localSteps].sort((a, b) => a.scheduledDay - b.scheduledDay);
   const sortedSteps = [...sortedAsc].reverse();
+
+  // ── フェーズ開閉state（MissionMap関数内に移動）──
+  const [openPhases, setOpenPhases] = useState<Set<number>>(() => {
+    if (!phases || phases.length === 0) return new Set([0]);
+    const completedDays = sortedAsc.filter(s => s.done).map(s => s.scheduledDay);
+    const maxCompletedDay = completedDays.length > 0 ? Math.max(...completedDays) : 0;
+    const currentPhaseIndex = phases.findIndex(
+      p => maxCompletedDay >= p.startDay && maxCompletedDay <= p.endDay
+    );
+    return new Set([Math.max(0, currentPhaseIndex)]);
+  });
+
+  const togglePhase = (index: number) => {
+    setOpenPhases(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) { next.delete(index); } else { next.add(index); }
+      return next;
+    });
+  };
+
+  // Day1が画面下に来るよう初期スクロール
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const timer = setTimeout(() => {
+      el.scrollTop = el.scrollHeight;
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
 
   const currentProgress =
     localSteps.length === 0
@@ -284,10 +308,7 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
       className="relative h-screen overflow-hidden text-sky-900"
       style={{ background: "linear-gradient(180deg, #e0f2fe 0%, #f0f9ff 50%, #ffffff 100%)" }}
     >
-
-      {/* ══════════════════════════════════
-          層1: GOALヘッダー（最前面・fixed）
-      ══════════════════════════════════ */}
+      {/* GOALヘッダー */}
       <div
         ref={headerRef}
         className="fixed left-0 right-0 top-0 z-30 pb-4 pt-6 text-center"
@@ -312,20 +333,13 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
             </div>
           </div>
         </div>
-
-        {/* GOALヘッダー直下のフェードアウト層 */}
         <div
           className="pointer-events-none absolute bottom-0 left-0 right-0 translate-y-full"
-          style={{
-            height: "48px",
-            background: "linear-gradient(to bottom, #e0f2fe, transparent)",
-          }}
+          style={{ height: "48px", background: "linear-gradient(to bottom, #e0f2fe, transparent)" }}
         />
       </div>
 
-      {/* ══════════════════════════════════
-          層2: ボタン群（fixed・下部）
-      ══════════════════════════════════ */}
+      {/* ボタン群 */}
       <div
         ref={footerRef}
         className="fixed bottom-0 left-0 right-0 z-30 px-4 pb-6 pt-4"
@@ -339,69 +353,123 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
           >
             {exporting ? "書き出し中..." : "Google Tasks に書き出す"}
           </button>
-          <Link
-            href={`/garden/${routeId}`}
-            className="w-full rounded-xl bg-emerald-500 py-3 text-center font-bold text-white transition hover:bg-emerald-600"
-          >
+          <Link href={`/garden/${routeId}`} className="w-full rounded-xl bg-emerald-500 py-3 text-center font-bold text-white transition hover:bg-emerald-600">
             果樹園（Garden）へ向かう 🍎
           </Link>
-          <Link
-            href="/history"
-            className="w-full rounded-xl bg-sky-100 py-3 text-center font-bold text-sky-600 transition hover:bg-sky-200"
-          >
+          <Link href="/history" className="w-full rounded-xl bg-sky-100 py-3 text-center font-bold text-sky-600 transition hover:bg-sky-200">
             📜 旅の記録を見る
           </Link>
         </div>
       </div>
 
-      {/* ══════════════════════════════════
-          層3: タスクリスト（スクロール領域）
-          ヘッダーとフッターの高さ分だけpaddingを確保
-      ══════════════════════════════════ */}
+      {/* タスクリスト */}
       <div
         ref={scrollRef}
         className="absolute inset-0 overflow-y-auto"
-        style={{
-          paddingTop: `${headerH + 48}px`,
-          paddingBottom: `${footerH}px`,
-          zIndex: 10,
-        }}
+        style={{ paddingTop: `${headerH + 48}px`, paddingBottom: `${footerH}px`, zIndex: 10 }}
       >
         <div className="relative mx-auto max-w-lg px-4">
-          {/* 中央縦ライン */}
           <div
             className="pointer-events-none absolute left-1/2 w-px -translate-x-1/2"
             style={{
-              top: 0,
-              bottom: 0,
+              top: 0, bottom: 0,
               background: "linear-gradient(to bottom, rgba(125,211,252,0.1), rgba(125,211,252,0.5) 20%, rgba(125,211,252,0.5) 80%, rgba(125,211,252,0.1))",
             }}
           />
 
           <div className="flex flex-col">
-            {sortedSteps.map((step, index) => (
-              <StepCard
-                key={step.id}
-                step={step}
-                index={index}
-                total={sortedSteps.length}
-                unlocked={isUnlocked(step.id)}
-                loading={loading}
-                editingStepId={editingStepId}
-                editTitle={editTitle}
-                editDescription={editDescription}
-                onToggle={() => handleToggle(step.id)}
-                onEditStart={() => handleEditStart(step)}
-                onEditSave={() => handleEditSave(step.id)}
-                onEditCancel={() => setEditingStepId(null)}
-                onEditTitleChange={setEditTitle}
-                onEditDescriptionChange={setEditDescription}
-              />
-            ))}
+            {phases && phases.length > 0 ? (
+              phases.map((phase, phaseIndex) => {
+                const phaseSteps = sortedSteps.filter(
+                  s => s.scheduledDay >= phase.startDay && s.scheduledDay <= phase.endDay
+                );
+                const phaseDone = phaseSteps.filter(s => s.done).length;
+                const phaseTotal = phaseSteps.length;
+                const phaseProgress = phaseTotal === 0 ? 0 : Math.round((phaseDone / phaseTotal) * 100);
+                const isOpen = openPhases.has(phaseIndex);
+                const isCompleted = phaseProgress === 100;
+
+                return (
+                  <div key={phaseIndex} className="mb-4">
+                    <button
+                      onClick={() => togglePhase(phaseIndex)}
+                      className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-sky-100/80 border border-sky-200 text-left transition hover:bg-sky-200/60"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg">
+                          {isCompleted ? "✅" : isOpen ? "📖" : "📕"}
+                        </span>
+                        <div>
+                          <p className="text-sm font-black text-sky-900">{phase.title}</p>
+                          <p className="text-xs text-sky-500">
+                            Day {phase.startDay} 〜 {phase.endDay}　{phaseDone}/{phaseTotal} 完了
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <div className="w-16 h-1.5 rounded-full bg-sky-200 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-sky-500 transition-all"
+                            style={{ width: `${phaseProgress}%` }}
+                          />
+                        </div>
+                        <span className="text-sky-400 text-xs">{isOpen ? "▲" : "▼"}</span>
+                      </div>
+                    </button>
+
+                    {isOpen && (
+                      <div className="mt-2">
+                        {phaseSteps.map((step) => {
+                          const globalIndex = sortedSteps.findIndex(s => s.id === step.id);
+                          return (
+                            <StepCard
+                              key={step.id}
+                              step={step}
+                              index={globalIndex}
+                              total={sortedSteps.length}
+                              unlocked={isUnlocked(step.id)}
+                              loading={loading}
+                              editingStepId={editingStepId}
+                              editTitle={editTitle}
+                              editDescription={editDescription}
+                              onToggle={() => handleToggle(step.id)}
+                              onEditStart={() => handleEditStart(step)}
+                              onEditSave={() => handleEditSave(step.id)}
+                              onEditCancel={() => setEditingStepId(null)}
+                              onEditTitleChange={setEditTitle}
+                              onEditDescriptionChange={setEditDescription}
+                            />
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            ) : (
+              sortedSteps.map((step, index) => (
+                <StepCard
+                  key={step.id}
+                  step={step}
+                  index={index}
+                  total={sortedSteps.length}
+                  unlocked={isUnlocked(step.id)}
+                  loading={loading}
+                  editingStepId={editingStepId}
+                  editTitle={editTitle}
+                  editDescription={editDescription}
+                  onToggle={() => handleToggle(step.id)}
+                  onEditStart={() => handleEditStart(step)}
+                  onEditSave={() => handleEditSave(step.id)}
+                  onEditCancel={() => setEditingStepId(null)}
+                  onEditTitleChange={setEditTitle}
+                  onEditDescriptionChange={setEditDescription}
+                />
+              ))
+            )}
           </div>
         </div>
       </div>
-
     </div>
   );
 }

@@ -25,4 +25,5 @@ export type RouteDoc = {
   steps: Step[];
   progress: number;
   createdAt: string;
+  phases?: Phase[];
 };

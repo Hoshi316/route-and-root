@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo} from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { onAuthStateChanged, User } from "firebase/auth";
@@ -75,7 +75,16 @@ export default function Home() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [goal, setGoal] = useState("");
-  const [durationDays, setDurationDays] = useState(7);
+  // durationDays を削除して、以下2行に置き換え
+  const [durationValue, setDurationValue] = useState(7);
+  const [durationUnit, setDurationUnit] = useState<"day" | "week" | "month">("day");
+
+  const durationDays = useMemo(() => {
+    if (durationUnit === "day")   return durationValue;
+    if (durationUnit === "week")  return durationValue * 7;
+    if (durationUnit === "month") return durationValue * 30;
+    return durationValue;
+  }, [durationValue, durationUnit]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -85,6 +94,9 @@ export default function Home() {
   const [recommendationMessage, setRecommendationMessage] = useState<string>("");
   const [activeRoutes, setActiveRoutes] = useState<RouteWithId[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
+
+
+
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -225,15 +237,32 @@ export default function Home() {
                 placeholder="例：Blenderで3Dモデリングをマスターする"
               />
             </div>
+            {/* 期間入力 */}
             <div className="mb-4">
-              <label className="mb-2 block font-semibold">何日で達成したい？</label>
-              <input
-                type="number"
-                value={durationDays}
-                onChange={(e) => setDurationDays(Number(e.target.value))}
-                className="w-full rounded-lg border border-gray-300 p-3"
-              />
+              <label className="mb-2 block font-semibold">期間</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={durationValue}
+                  onChange={(e) => setDurationValue(Number(e.target.value))}
+                  className="w-24 rounded-lg border border-gray-300 p-3"
+                  min={1}
+                />
+                <select
+                  value={durationUnit}
+                  onChange={(e) => setDurationUnit(e.target.value as "day" | "week" | "month")}
+                  className="flex-1 rounded-lg border border-gray-300 p-3 bg-white"
+                >
+                  <option value="day">日</option>
+                  <option value="week">週</option>
+                  <option value="month">ヶ月</option>
+                </select>
+              </div>
+              <p className="mt-1 text-xs text-gray-400">
+                = {durationDays} 日間
+              </p>
             </div>
+
             <div className="mb-4">
               <label className="mb-2 block font-semibold">自分への一言</label>
               <textarea

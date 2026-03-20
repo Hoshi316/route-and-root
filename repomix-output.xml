@@ -681,6 +681,7 @@ export type RouteDoc = {
   steps: Step[];
   progress: number;
   createdAt: string;
+  phases?: Phase[];
 };
 </file>
 
@@ -1038,6 +1039,12 @@ export default async function MapPage({ params }: PageProps) {
       scheduledDay: number;
       done: boolean;
     }[];
+    phases?: {
+    title: string;
+    startDay: number;
+    endDay: number;
+    description: string;
+  }[];
   };
 
   return (
@@ -1047,6 +1054,7 @@ export default async function MapPage({ params }: PageProps) {
       summary={typedRoute.summary}
       progress={typedRoute.progress}
       steps={typedRoute.steps}
+      phases={typedRoute.phases}
     />
   );
 }
@@ -1717,12 +1725,43 @@ type Step = {
   done: boolean;
 };
 
+type Phase = {
+  title: string;
+  startDay: number;
+  endDay: number;
+  description: string;
+};
+
 type Props = {
   routeId: string;
   goal: string;
   summary: string;
   progress: number;
   steps: Step[];
+  phases?: Phase[];
+};
+
+const [openPhases, setOpenPhases] = useState<Set<number>>(
+  // 初期状態：現在進行中のフェーズだけ開く
+  () => {
+    if (!phases || phases.length === 0) return new Set([0]);
+    const completedDays = sortedAsc
+      .filter(s => s.done)
+      .map(s => s.scheduledDay);
+    const maxCompletedDay = completedDays.length > 0 ? Math.max(...completedDays) : 0;
+    const currentPhaseIndex = phases.findIndex(
+      p => maxCompletedDay >= p.startDay && maxCompletedDay <= p.endDay
+    );
+    return new Set([Math.max(0, currentPhaseIndex)]);
+  }
+);
+
+const togglePhase = (index: number) => {
+  setOpenPhases(prev => {
+    const next = new Set(prev);
+    if (next.has(index)) { next.delete(index); } else { next.add(index); }
+    return next;
+  });
 };
 
 function StepCard({
@@ -2082,26 +2121,103 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
           />
 
           <div className="flex flex-col">
-            {sortedSteps.map((step, index) => (
-              <StepCard
-                key={step.id}
-                step={step}
-                index={index}
-                total={sortedSteps.length}
-                unlocked={isUnlocked(step.id)}
-                loading={loading}
-                editingStepId={editingStepId}
-                editTitle={editTitle}
-                editDescription={editDescription}
-                onToggle={() => handleToggle(step.id)}
-                onEditStart={() => handleEditStart(step)}
-                onEditSave={() => handleEditSave(step.id)}
-                onEditCancel={() => setEditingStepId(null)}
-                onEditTitleChange={setEditTitle}
-                onEditDescriptionChange={setEditDescription}
-              />
-            ))}
-          </div>
+  {phases && phases.length > 0 ? (
+    // フェーズあり：アコーディオン表示
+    phases.map((phase, phaseIndex) => {
+      const phaseSteps = sortedSteps.filter(
+        s => s.scheduledDay >= phase.startDay && s.scheduledDay <= phase.endDay
+      );
+      const phaseDone = phaseSteps.filter(s => s.done).length;
+      const phaseTotal = phaseSteps.length;
+      const phaseProgress = phaseTotal === 0 ? 0 : Math.round((phaseDone / phaseTotal) * 100);
+      const isOpen = openPhases.has(phaseIndex);
+      const isCompleted = phaseProgress === 100;
+
+      return (
+        <div key={phaseIndex} className="mb-4">
+          {/* フェーズヘッダー */}
+          <button
+            onClick={() => togglePhase(phaseIndex)}
+            className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-sky-100/80 border border-sky-200 text-left transition hover:bg-sky-200/60"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-lg">
+                {isCompleted ? "✅" : isOpen ? "📖" : "📕"}
+              </span>
+              <div>
+                <p className="text-sm font-black text-sky-900">{phase.title}</p>
+                <p className="text-xs text-sky-500">
+                  Day {phase.startDay} 〜 {phase.endDay}　{phaseDone}/{phaseTotal} 完了
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* フェーズ進捗バー */}
+              <div className="w-16 h-1.5 rounded-full bg-sky-200 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-sky-500 transition-all"
+                  style={{ width: `${phaseProgress}%` }}
+                />
+              </div>
+              <span className="text-sky-400 text-xs">
+                {isOpen ? "▲" : "▼"}
+              </span>
+            </div>
+          </button>
+
+          {/* フェーズ内ステップ */}
+          {isOpen && (
+            <div className="mt-2">
+              {phaseSteps.map((step, index) => {
+                const globalIndex = sortedSteps.findIndex(s => s.id === step.id);
+                return (
+                  <StepCard
+                    key={step.id}
+                    step={step}
+                    index={globalIndex}
+                    total={sortedSteps.length}
+                    unlocked={isUnlocked(step.id)}
+                    loading={loading}
+                    editingStepId={editingStepId}
+                    editTitle={editTitle}
+                    editDescription={editDescription}
+                    onToggle={() => handleToggle(step.id)}
+                    onEditStart={() => handleEditStart(step)}
+                    onEditSave={() => handleEditSave(step.id)}
+                    onEditCancel={() => setEditingStepId(null)}
+                    onEditTitleChange={setEditTitle}
+                    onEditDescriptionChange={setEditDescription}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    })
+  ) : (
+    // フェーズなし（既存ルート）：従来の表示
+    sortedSteps.map((step, index) => (
+      <StepCard
+        key={step.id}
+        step={step}
+        index={index}
+        total={sortedSteps.length}
+        unlocked={isUnlocked(step.id)}
+        loading={loading}
+        editingStepId={editingStepId}
+        editTitle={editTitle}
+        editDescription={editDescription}
+        onToggle={() => handleToggle(step.id)}
+        onEditStart={() => handleEditStart(step)}
+        onEditSave={() => handleEditSave(step.id)}
+        onEditCancel={() => setEditingStepId(null)}
+        onEditTitleChange={setEditTitle}
+        onEditDescriptionChange={setEditDescription}
+      />
+    ))
+  )}
+</div>
         </div>
       </div>
 
@@ -2482,6 +2598,17 @@ const stepSchema = {
   required: ["title", "description", "scheduledDay"],
 };
 
+const phaseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title:          { type: Type.STRING, description: "フェーズ名（例：基礎固め）" },
+    startDay:       { type: Type.INTEGER },
+    endDay:         { type: Type.INTEGER },
+    description:    { type: Type.STRING, description: "このフェーズの目標を1文で" },
+  },
+  required: ["title", "startDay", "endDay", "description"],
+};
+
 const planSchema = {
   type: Type.OBJECT,
   properties: {
@@ -2622,7 +2749,14 @@ recommendationMessage: 推薦理由を「ユーザーの状況に寄り添った
 - steps.description: 40文字以内
 
 長い文章は必ず削れ。無駄な情報を削ぎ落とすことがこのプランナーの美学である。
-`;
+【フェーズ分割ルール】
+- 期間が14日以下：phases は1つ（全体を1フェーズ）
+- 期間が15〜60日：phases は2〜3つ
+- 期間が61日以上：phases は3〜5つ
+- 各フェーズにタイトルをつけること（例：「第1章：基礎固め」「第2章：実践編」）
+- フェーズのstartDayとendDayはstepsのscheduledDayと整合させること
+`
+;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -2758,7 +2892,7 @@ export async function getUserRouteSummary(userId: string): Promise<string> {
 <file path="app/page.tsx">
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo} from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
 import { onAuthStateChanged, User } from "firebase/auth";
@@ -2843,6 +2977,15 @@ export default function Home() {
   const [recommendationMessage, setRecommendationMessage] = useState<string>("");
   const [activeRoutes, setActiveRoutes] = useState<RouteWithId[]>([]);
   const [routesLoading, setRoutesLoading] = useState(false);
+
+  const [durationUnit, setDurationUnit] = useState<"day" | "week" | "month">("day");
+
+  const durationDays = useMemo(() => {
+    if (durationUnit === "day")   return durationValue;
+    if (durationUnit === "week")  return durationValue * 7;
+    if (durationUnit === "month") return durationValue * 30;
+    return durationValue;
+  }, [durationValue, durationUnit]);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -2983,15 +3126,32 @@ export default function Home() {
                 placeholder="例：Blenderで3Dモデリングをマスターする"
               />
             </div>
+            {/* 期間入力 */}
             <div className="mb-4">
-              <label className="mb-2 block font-semibold">何日で達成したい？</label>
-              <input
-                type="number"
-                value={durationDays}
-                onChange={(e) => setDurationDays(Number(e.target.value))}
-                className="w-full rounded-lg border border-gray-300 p-3"
-              />
+              <label className="mb-2 block font-semibold">期間</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={durationValue}
+                  onChange={(e) => setDurationValue(Number(e.target.value))}
+                  className="w-24 rounded-lg border border-gray-300 p-3"
+                  min={1}
+                />
+                <select
+                  value={durationUnit}
+                  onChange={(e) => setDurationUnit(e.target.value as "day" | "week" | "month")}
+                  className="flex-1 rounded-lg border border-gray-300 p-3 bg-white"
+                >
+                  <option value="day">日</option>
+                  <option value="week">週</option>
+                  <option value="month">ヶ月</option>
+                </select>
+              </div>
+              <p className="mt-1 text-xs text-gray-400">
+                = {durationDays} 日間
+              </p>
             </div>
+
             <div className="mb-4">
               <label className="mb-2 block font-semibold">自分への一言</label>
               <textarea
@@ -3012,81 +3172,75 @@ export default function Home() {
           </div>
         )}
 
-        {/* ── 進行中・過去のルート ── */}
+        {/* ── 進行中の旅（カルーセル） ── */}
         {user && !editablePlans && (
           <div className="mt-6">
             {routesLoading ? (
               <div className="flex justify-center py-6">
                 <div className="h-6 w-6 animate-spin rounded-full border-2 border-orange-400 border-t-transparent" />
               </div>
-            ) : activeRoutes.length > 0 ? (
-              <div className="rounded-2xl border border-orange-200 bg-white p-5 shadow-sm">
-                <h2 className="mb-4 flex items-center gap-2 font-bold text-gray-700">
-                  <span>🗺️</span>
-                  <span>あなたの旅</span>
-                  <Link href="/history" className="ml-auto text-xs font-normal text-orange-400 underline">
-                    すべて見る
+            ) : activeRoutes.filter(r => r.progress < 100).length > 0 ? (
+              <>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="font-bold text-gray-700">🚶 進行中の旅</h2>
+                  <Link href="/history" className="text-xs text-orange-400 underline">
+                    すべて見る →
                   </Link>
-                </h2>
-                <div className="space-y-3">
-                  {/* ── 進行中の旅（カルーセル） ── */}
-{user && !editablePlans && activeRoutes.filter(r => r.progress < 100).length > 0 && (
-  <div className="mt-6">
-    <div className="mb-3 flex items-center justify-between">
-      <h2 className="font-bold text-gray-700">🚶 進行中の旅</h2>
-      <Link href="/history" className="text-xs text-orange-400 underline">
-        すべて見る →
-      </Link>
-    </div>
-
-    {/* 横スクロールカルーセル */}
-    <div className="flex gap-3 overflow-x-auto pb-2 -mx-2 px-2"
-      style={{ scrollSnapType: "x mandatory" }}
-    >
-      {activeRoutes
-        .filter(r => r.progress < 100)
-        .slice(0, 5)
-        .map((route) => {
-          const completedCount = route.steps.filter((s) => s.done).length;
-          return (
-            <div
-              key={route.id}
-              className="shrink-0 w-64 rounded-2xl border border-orange-200 bg-white p-4 shadow-sm"
-              style={{ scrollSnapAlign: "start" }}
-            >
-              <p className="mb-1 text-xs font-bold text-orange-400 truncate">{route.goal}</p>
-              <div className="mb-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-                <div
-                  className="h-full rounded-full bg-orange-400"
-                  style={{ width: `${route.progress}%` }}
-                />
-              </div>
-              <p className="mb-3 text-xs text-gray-400">
-                {completedCount}/{route.steps.length} ステップ　{route.progress}%
-              </p>
-              <div className="flex gap-2">
-                <Link
-                  href={`/map/${route.id}`}
-                  className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white"
-                >
-                  🗺️ マップ
-                </Link>
-                <Link
-                  href={`/garden/${route.id}`}
-                  className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white"
-                >
-                  🍎 農園
-                </Link>
-              </div>
-            </div>
-          );
-        })}
-    </div>
-  </div>
-)}
                 </div>
+                <div
+                  className="flex gap-3 overflow-x-auto pb-3 -mx-2 px-2"
+                  style={{ scrollSnapType: "x mandatory" }}
+                >
+                  {activeRoutes
+                    .filter(r => r.progress < 100)
+                    .slice(0, 5)
+                    .map((route) => {
+                      const completedCount = route.steps.filter((s) => s.done).length;
+                      return (
+                        <div
+                          key={route.id}
+                          className="shrink-0 w-64 rounded-2xl border border-orange-200 bg-white p-4 shadow-sm"
+                          style={{ scrollSnapAlign: "start" }}
+                        >
+                          <p className="mb-2 text-sm font-bold text-gray-800 line-clamp-2 leading-snug">
+                            {route.goal}
+                          </p>
+                          <div className="mb-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                            <div
+                              className="h-full rounded-full bg-orange-400 transition-all"
+                              style={{ width: `${route.progress}%` }}
+                            />
+                          </div>
+                          <p className="mb-3 text-xs text-gray-400">
+                            {completedCount}/{route.steps.length} ステップ完了　{route.progress}%
+                          </p>
+                          <div className="flex gap-2">
+                            <Link
+                              href={`/map/${route.id}`}
+                              className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-orange-600"
+                            >
+                              🗺️ マップ
+                            </Link>
+                            <Link
+                              href={`/garden/${route.id}`}
+                              className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-emerald-600"
+                            >
+                              🍎 農園
+                            </Link>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-orange-200 bg-white p-4 text-center">
+                <p className="text-sm text-gray-400">進行中の旅はありません</p>
+                <Link href="/history" className="mt-1 inline-block text-xs text-orange-400 underline">
+                  過去の旅を見る
+                </Link>
               </div>
-            ) : null}
+            )}
           </div>
         )}
 
@@ -3167,7 +3321,10 @@ export default function Home() {
                     <div className="mb-4 space-y-2">
                       <p className="text-xs font-bold text-gray-500">✏️ ステップを編集できます（保存前に調整可）</p>
                       {plan.steps.map((step, stepIndex) => (
-                        <div key={stepIndex} className={`rounded-xl border p-3 ${config.editBg}`}>
+                        <div
+                          key={stepIndex}
+                          className={`rounded-xl border p-3 min-h-[80px] flex flex-col justify-between ${config.editBg}`}
+                        >
                           {step._editing ? (
                             <div className="space-y-2">
                               <div className="flex items-center gap-2">
@@ -3195,40 +3352,38 @@ export default function Home() {
                                 rows={2}
                                 placeholder="ステップの説明"
                               />
-                              <button onClick={() => toggleEditStep(plan.style, stepIndex)} className="rounded-lg bg-gray-700 px-3 py-1 text-xs font-bold text-white">
+                              <button
+                                onClick={() => toggleEditStep(plan.style, stepIndex)}
+                                className="rounded-lg bg-gray-700 px-3 py-1 text-xs font-bold text-white"
+                              >
                                 確定
                               </button>
                             </div>
                           ) : (
-                            {/* 表示モード */}
-<div className="flex items-start justify-between gap-2">
-  <div className="flex-1 min-w-0">
-    <p className="text-xs font-bold text-gray-400">Day {step.scheduledDay}</p>
-
-    {/* タイトル：1行で切る */}
-    <p className="text-sm font-bold text-gray-800 truncate">
-      {step.title}
-    </p>
-
-    {/* 説明文：2行でclamp、ホバーで全文表示 */}
-    <div className="group relative">
-      <p className="text-xs text-gray-500 line-clamp-2">
-        {step.description}
-      </p>
-      {step.description.length > 40 && (
-        <div className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-xl border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-xl group-hover:block animate-in fade-in zoom-in duration-200">
-          {step.description}
-        </div>
-      )}
-    </div>
-  </div>
-  <button
-    onClick={() => toggleEditStep(plan.style, stepIndex)}
-    className="shrink-0 rounded-lg bg-white/80 px-2 py-1 text-xs text-gray-400 hover:text-gray-700 border border-gray-200"
-  >
-    ✏️
-  </button>
-</div>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-gray-400">Day {step.scheduledDay}</p>
+                                <p className="text-sm font-bold text-gray-800 truncate">
+                                  {step.title}
+                                </p>
+                                <div className="group relative">
+                                  <p className="text-xs text-gray-500 line-clamp-2">
+                                    {step.description}
+                                  </p>
+                                  {step.description.length > 40 && (
+                                    <div className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-xl border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-xl group-hover:block animate-in fade-in zoom-in duration-200">
+                                      {step.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => toggleEditStep(plan.style, stepIndex)}
+                                className="shrink-0 rounded-lg bg-white/80 px-2 py-1 text-xs text-gray-400 hover:text-gray-700 border border-gray-200"
+                              >
+                                ✏️
+                              </button>
+                            </div>
                           )}
                         </div>
                       ))}

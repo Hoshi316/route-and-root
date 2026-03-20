@@ -23,6 +23,12 @@ export default async function MapPage({ params }: PageProps) {
       scheduledDay: number;
       done: boolean;
     }[];
+    phases?: {
+    title: string;
+    startDay: number;
+    endDay: number;
+    description: string;
+  }[];
   };
 
   return (
@@ -32,6 +38,7 @@ export default async function MapPage({ params }: PageProps) {
       summary={typedRoute.summary}
       progress={typedRoute.progress}
       steps={typedRoute.steps}
+      phases={typedRoute.phases}
     />
   );
 }
