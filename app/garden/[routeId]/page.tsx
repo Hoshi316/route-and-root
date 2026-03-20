@@ -35,6 +35,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
 
   const pendingCount = pendingApples.length;
   const isFull = nutrition >= 100;
+  const [currentStep, setCurrentStep] = useState<{ scheduledDay: number; title: string } | null>(null);
 
   // 2. 音声認識のセットアップ（Web Speech API）
   const toggleRecording = async () => {
@@ -88,16 +89,24 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     async function fetchRoute() {
-      try {
-        const res = await fetch(`/api/get-route?routeId=${routeId}`);
-        const data = await res.json();
-        setRouteName(data.goal || "無題の目標");
-        setHasGrown(data.hasGrown || false);
-        setNutrition(data.nutrition || 0);
-        setPendingApples(data.pendingApples || []);
-        setVariety(data.currentVariety || 'forest');
-      } catch (e) { console.error(e); } finally { setLoading(false); }
-    }
+  try {
+    const res = await fetch(`/api/get-route?routeId=${routeId}`);
+    const data = await res.json();
+    setRouteName(data.goal || "無題の目標");
+    setHasGrown(data.hasGrown || false);
+    setNutrition(data.nutrition || 0);
+    setPendingApples(data.pendingApples || []);
+    setVariety(data.currentVariety || 'forest');
+
+    // ↓ 追加：現在進行中のステップを特定
+    const steps = data.steps || [];
+    const sortedSteps = [...steps].sort((a: any, b: any) => a.scheduledDay - b.scheduledDay);
+    const currentStep = sortedSteps.find((s: any) => !s.done) || null;
+    setCurrentStep(currentStep);
+
+  } catch (e) { console.error(e); } finally { setLoading(false); }
+}
+
     fetchRoute();
     return () => unsubscribe();
   }, [routeId]);
@@ -142,7 +151,14 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
           createdAt: new Date().toISOString()
         };
       } else {
-        nextApples.push({ variety: data.variety, note: newNote, moodScore: useMood ? mood : null, comment: data.message, createdAt: new Date().toISOString() });
+        nextApples.push({ 
+          variety: data.variety, 
+          note: newNote, 
+          moodScore: useMood ? mood : null, 
+          comment: data.message, createdAt: new Date().toISOString(), 
+          stepDay: currentStep?.scheduledDay ?? null,    
+          stepTitle: currentStep?.title ?? null,  
+        });
       }
 
       setVariety(data.variety);
@@ -175,6 +191,9 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
             variety: apple.variety,
             comment: apple.comment || "",
             source: "garden", // ← 貯蔵庫で分類するために追加
+            stepDay: currentStep?.scheduledDay ?? null,    
+            stepTitle: currentStep?.title ?? null,   
+
           })
         })
       ));

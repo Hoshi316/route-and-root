@@ -63,6 +63,13 @@ export default function HistoryPage() {
             ＋ 新しい旅へ
           </Link>
         </div>
+        // 既存の「＋ 新しい旅へ」ボタンの隣に追加
+      <Link
+        href="/orchard"
+        className="rounded-xl bg-orange-100 px-4 py-2 text-sm font-bold text-orange-600 shadow hover:bg-orange-200"
+        >
+        🌳 みんなの広場
+        </Link>
 
         {/* ルート一覧 */}
         {routes.length === 0 ? (

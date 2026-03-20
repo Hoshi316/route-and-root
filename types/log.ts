@@ -10,4 +10,6 @@ export type LogDoc = {
   createdAt: string;
   variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare'; // ★これを追加
   source?: 'garden' | 'step';
+  stepDay?: number | null;
+  stepTitle?: string | null;
 };

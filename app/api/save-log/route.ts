@@ -4,7 +4,7 @@ import { LogDoc } from "@/types/log";
 
 export async function POST(req: Request) {
   try {
-    const { userId, routeId, routeName, moodScore, note, variety, comment, source } = await req.json();
+    const { userId, routeId, routeName, moodScore, note, variety, comment, source, stepDay, stepTitle } = await req.json();
 
     if (!userId || !routeId || !moodScore) {
       return Response.json({ error: "userId, routeId, moodScore は必須です" }, { status: 400 });
@@ -21,7 +21,9 @@ export async function POST(req: Request) {
       appleSize: 100,
       comment: comment || "",
       createdAt: new Date().toISOString(),
-      source: source || "garden", // ← 追加
+      source: source || "garden",
+      stepDay: stepDay ?? null,
+      stepTitle: stepTitle ?? null,
     };
 
     const logId = await saveLog(log);

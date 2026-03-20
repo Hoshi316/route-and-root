@@ -105,6 +105,8 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const [isPublic, setIsPublic] = useState(true);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
     return () => unsubscribe();
@@ -244,6 +246,8 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
           variety,
           comment: `難易度: ${["簡単","やや簡単","普通","やや難しい","難しい"][feedbackData.difficulty - 1]} / ${feedbackData.feeling}`,
           source: 'step',
+          stepDay: pendingStep.scheduledDay,  
+          stepTitle: pendingStep.title,   
         })
       });
     }
@@ -375,7 +379,40 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
               )}
             </div>
             
-            <button type="button" onClick={() => router.push(`/collection/${routeId}`)} style={{width:"100%", padding:"16px", borderRadius:"16px", border:"none", background:"linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)", color:"#fff", fontWeight:800, fontSize:"15px", cursor:"pointer", boxShadow:"0 10px 20px rgba(37,99,235,0.3)"}}>
+           
+           {/* シェア機能 */}
+          
+            <div style={{marginBottom:"16px", textAlign:"left", background:"#f8fafc", borderRadius:"12px", padding:"12px 16px", border:"1px solid #e2e8f0"}}>
+            <label style={{display:"flex", alignItems:"center", gap:"10px", cursor:"pointer"}}>
+            <input
+            type="checkbox"
+            checked={isPublic}
+            onChange={(e) => setIsPublic(e.target.checked)}
+            style={{width:"18px", height:"18px", accentColor:"#3b82f6"}}
+    />
+             <span style={{fontSize:"13px", fontWeight:700, color:"#475569"}}>
+               この旅の結果をみんなにおすそわけする 🐝
+            </span>
+            </label>
+            <p style={{fontSize:"10px", color:"#94a3b8", marginTop:"4px", marginLeft:"28px"}}>
+            公開すると広場にあなたのリンゴとAI診断が表示されます
+            </p>
+            </div>
+
+            <button
+            type="button"
+            onClick={async () => {
+            try {
+            await fetch("/api/update-route-status", {
+            method: "POST",
+             headers: {"Content-Type": "application/json"},
+             body: JSON.stringify({ routeId, isPublic }),
+              });
+             } catch (e) { console.error(e); }
+            router.push(`/collection/${routeId}`);
+             }}
+             style={{width:"100%", padding:"16px", borderRadius:"16px", border:"none", background:"linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)", color:"#fff", fontWeight:800, fontSize:"15px", cursor:"pointer", boxShadow:"0 10px 20px rgba(37,99,235,0.3)"}}
+>   
               貯蔵庫で情熱の結晶を確認する 📦
             </button>
           </div>

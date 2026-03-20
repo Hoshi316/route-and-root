@@ -35,14 +35,11 @@ export default function CollectionPage() {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) return;
       setUserId(user.uid);
-
       try {
-        // このrouteIdのルート情報を取得
         const routeRes = await fetch(`/api/get-route?routeId=${routeId}`);
         const routeData = await routeRes.json();
         setRouteName(routeData.goal || "");
 
-        // このrouteIdに紐づくログだけ取得
         const logsRes = await fetch(`/api/get-user-logs?userId=${user.uid}&routeId=${routeId}`);
         const logsData = await logsRes.json();
         setApples((logsData.logs || []) as AppleLog[]);
@@ -55,9 +52,10 @@ export default function CollectionPage() {
     return () => unsubscribe();
   }, [routeId]);
 
-  // garden（グリッド） と step（Day別） に分離
-  const { gardenApples, stepGroups } = useMemo(() => {
-    const gardenApples: AppleLog[] = [];
+  // 農園: stepDayでグループ化（stepDayなしは日付）
+  // ステップ: stepDayでグループ化
+  const { gardenGroups, stepGroups } = useMemo(() => {
+    const gardenGroups: Record<string, AppleLog[]> = {};
     const stepGroups: Record<string, AppleLog[]> = {};
 
     [...apples]
@@ -70,21 +68,30 @@ export default function CollectionPage() {
           if (!stepGroups[key]) stepGroups[key] = [];
           stepGroups[key].push(apple);
         } else {
-          gardenApples.push(apple);
+          // 農園リンゴはstepDayがあればDay番号、なければ日付でグループ化
+          const key = apple.stepDay != null
+            ? `Day ${apple.stepDay}${apple.stepTitle ? ` (${apple.stepTitle})` : ""} の途中`
+            : new Date(apple.createdAt).toLocaleDateString("ja-JP");
+          if (!gardenGroups[key]) gardenGroups[key] = [];
+          gardenGroups[key].push(apple);
         }
       });
 
-    return { gardenApples, stepGroups };
+    return { gardenGroups, stepGroups };
   }, [apples]);
 
-  const sortedSteps = Object.entries(stepGroups).sort(([a], [b]) => {
-    const dayA = parseInt(a.replace("Day ", "")) || 999;
-    const dayB = parseInt(b.replace("Day ", "")) || 999;
-    return dayA - dayB;
-  });
+  const sortByDay = (entries: [string, AppleLog[]][]) =>
+    entries.sort(([a], [b]) => {
+      const dayA = parseInt(a.match(/Day (\d+)/)?.[1] || "999");
+      const dayB = parseInt(b.match(/Day (\d+)/)?.[1] || "999");
+      return dayA - dayB;
+    });
 
-  const gardenCount = gardenApples.length;
-  const stepCount = Object.values(stepGroups).flat().length;
+  const sortedGarden = sortByDay(Object.entries(gardenGroups));
+  const sortedSteps = sortByDay(Object.entries(stepGroups));
+
+  const gardenCount = apples.filter(a => a.source !== 'step').length;
+  const stepCount = apples.filter(a => a.source === 'step').length;
 
   if (loading) return (
     <div className="flex min-h-screen items-center justify-center bg-stone-50">
@@ -92,20 +99,53 @@ export default function CollectionPage() {
     </div>
   );
 
+  const AppleButton = ({ apple, isStep }: { apple: AppleLog; isStep: boolean }) => (
+    <button
+      key={apple.id}
+      onClick={() => setSelectedApple(apple)}
+      className={`group flex flex-col items-center p-3 rounded-[16px] border border-transparent transition-all ${
+        isStep
+          ? "bg-sky-50/50 hover:bg-sky-100 hover:border-sky-200"
+          : "bg-stone-50 hover:bg-orange-50 hover:border-orange-200"
+      }`}
+    >
+      <img src={`/images/apple-${apple.variety}.svg`} alt={apple.variety} className="w-10 h-10 object-contain drop-shadow-md group-hover:scale-110 transition-transform" />
+      <span className={`mt-1 text-[7px] font-black ${isStep ? "text-sky-300" : "text-stone-300"}`}>
+        {new Date(apple.createdAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
+      </span>
+    </button>
+  );
+
+  const GroupSection = ({ groupKey, groupApples, isStep }: { groupKey: string; groupApples: AppleLog[]; isStep: boolean }) => (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className={`text-[11px] font-black ${isStep ? "text-sky-500" : "text-emerald-600"}`}>
+          {groupKey}
+        </span>
+        <div className={`flex-1 h-px ${isStep ? "bg-sky-50" : "bg-stone-100"}`} />
+        <span className="text-[10px] text-stone-300">{groupApples.length}個</span>
+      </div>
+      <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
+        {groupApples.map((apple) => (
+          <AppleButton key={apple.id} apple={apple} isStep={isStep} />
+        ))}
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-stone-50 p-6 pb-32">
-      {/* ヘッダー */}
       <header className="max-w-2xl mx-auto mb-10">
         <p className="text-xs font-black text-stone-300 uppercase tracking-widest mb-2">リンゴ貯蔵庫</p>
         <h1 className="text-2xl font-black text-stone-800 mb-1">📍 {routeName}</h1>
         <p className="text-xs text-stone-400 font-bold">
-          農園 {gardenCount}個 ／ ステップ {stepCount}個 ／ 合計 {gardenCount + stepCount}個
+          農園 {gardenCount}個 ／ ステップ {stepCount}個 ／ 合計 {apples.length}個
         </p>
       </header>
 
       <div className="max-w-2xl mx-auto space-y-10">
 
-        {/* 農園のリンゴ */}
+        {/* 農園のリンゴ（Day別グループ） */}
         {gardenCount > 0 && (
           <section className="bg-white rounded-[32px] p-6 shadow-sm border border-stone-100">
             <div className="flex items-center gap-2 mb-6">
@@ -113,24 +153,15 @@ export default function CollectionPage() {
               <span className="text-sm font-black text-emerald-600 uppercase tracking-widest">農園の記録</span>
               <span className="text-[10px] bg-emerald-50 text-emerald-500 font-black px-2 py-0.5 rounded-full border border-emerald-100 ml-auto">{gardenCount}個</span>
             </div>
-            <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
-              {gardenApples.map((apple) => (
-                <button
-                  key={apple.id}
-                  onClick={() => setSelectedApple(apple)}
-                  className="group flex flex-col items-center p-3 rounded-[16px] bg-stone-50 hover:bg-orange-50 border border-transparent hover:border-orange-200 transition-all"
-                >
-                  <img src={`/images/apple-${apple.variety}.svg`} alt={apple.variety} className="w-10 h-10 object-contain drop-shadow-md group-hover:scale-110 transition-transform" />
-                  <span className="mt-1 text-[7px] font-black text-stone-300">
-                    {new Date(apple.createdAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" })}
-                  </span>
-                </button>
+            <div className="space-y-6">
+              {sortedGarden.map(([key, groupApples]) => (
+                <GroupSection key={key} groupKey={key} groupApples={groupApples} isStep={false} />
               ))}
             </div>
           </section>
         )}
 
-        {/* ステップのリンゴ */}
+        {/* ステップのリンゴ（Day別グループ） */}
         {stepCount > 0 && (
           <section className="bg-white rounded-[32px] p-6 shadow-sm border border-stone-100">
             <div className="flex items-center gap-2 mb-6">
@@ -139,34 +170,14 @@ export default function CollectionPage() {
               <span className="text-[10px] bg-sky-50 text-sky-500 font-black px-2 py-0.5 rounded-full border border-sky-100 ml-auto">{stepCount}個</span>
             </div>
             <div className="space-y-6">
-              {sortedSteps.map(([stepKey, stepApples]) => (
-                <div key={stepKey}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className="text-[11px] font-black text-sky-500">{stepKey}</span>
-                    <div className="flex-1 h-px bg-sky-50" />
-                    <span className="text-[10px] text-stone-300">{stepApples.length}個</span>
-                  </div>
-                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-3">
-                    {stepApples.map((apple) => (
-                      <button
-                        key={apple.id}
-                        onClick={() => setSelectedApple(apple)}
-                        className="group flex flex-col items-center p-3 rounded-[16px] bg-sky-50/50 hover:bg-sky-100 border border-transparent hover:border-sky-200 transition-all"
-                      >
-                        <img src={`/images/apple-${apple.variety}.svg`} alt={apple.variety} className="w-10 h-10 object-contain drop-shadow-md group-hover:scale-110 transition-transform" />
-                        <span className="mt-1 text-[7px] font-black text-sky-300">
-                          {new Date(apple.createdAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              {sortedSteps.map(([key, groupApples]) => (
+                <GroupSection key={key} groupKey={key} groupApples={groupApples} isStep={true} />
               ))}
             </div>
           </section>
         )}
 
-        {gardenCount === 0 && stepCount === 0 && (
+        {apples.length === 0 && (
           <div className="text-center py-20 bg-white rounded-[40px] border-4 border-dashed border-orange-100">
             <p className="text-slate-400 font-bold">まだリンゴがありません。農園で育ててみましょう！</p>
           </div>
@@ -198,10 +209,14 @@ export default function CollectionPage() {
                 </div>
               </div>
 
-              {selectedApple.stepTitle && (
+              {selectedApple.stepDay != null && (
                 <div className="bg-sky-50 rounded-2xl p-3 mb-3 border border-sky-100">
-                  <p className="text-[9px] font-black text-sky-300 uppercase mb-1">完了ステップ</p>
-                  <p className="text-sm text-sky-700 font-bold">Day {selectedApple.stepDay}: {selectedApple.stepTitle}</p>
+                  <p className="text-[9px] font-black text-sky-300 uppercase mb-1">
+                    {selectedApple.source === 'step' ? '完了ステップ' : '育てていた頃のステップ'}
+                  </p>
+                  <p className="text-sm text-sky-700 font-bold">
+                    Day {selectedApple.stepDay}{selectedApple.stepTitle ? `: ${selectedApple.stepTitle}` : ""}
+                  </p>
                 </div>
               )}
               {selectedApple.note && (
@@ -212,7 +227,9 @@ export default function CollectionPage() {
               )}
               {selectedApple.comment && (
                 <div className="bg-orange-50 rounded-2xl p-4 mb-5 border border-orange-100">
-                  <p className="text-[9px] font-black text-orange-300 uppercase mb-2">{selectedApple.source === 'step' ? 'フィードバック' : '園主の言葉'}</p>
+                  <p className="text-[9px] font-black text-orange-300 uppercase mb-2">
+                    {selectedApple.source === 'step' ? 'フィードバック' : '園主の言葉'}
+                  </p>
                   <p className="text-sm text-stone-600 font-bold italic leading-relaxed">「{selectedApple.comment}」</p>
                 </div>
               )}
@@ -224,7 +241,6 @@ export default function CollectionPage() {
         </div>
       )}
 
-      {/* フッター */}
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
         <Link href={`/garden/${routeId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
           <span className="text-2xl">🌳</span><span className="text-[10px] font-black text-slate-400">農園</span>
