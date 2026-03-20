@@ -88,7 +88,7 @@ export default function HistoryPage() {
                     className="flex items-center gap-3 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-orange-50 transition"
                   >
                     <span>🌳</span>
-                    <span>みんなの広場</span>
+                    <span>直売所</span>
                   </Link>
                   <div className="h-px bg-orange-50" />
                   <button

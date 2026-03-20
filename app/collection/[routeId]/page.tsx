@@ -260,7 +260,7 @@ export default function CollectionPage() {
         onClick={() => setShowShareForm(true)}
         style={{width:"100%",padding:"10px",borderRadius:"12px",border:"1.5px solid #e2e8f0",background:"#f8fafc",fontSize:"13px",fontWeight:700,color:"#64748b",cursor:"pointer"}}
       >
-        🐝 みんなの広場にシェアする
+        🐝 直売所にシェアする
       </button>
     ) : (
       <div style={{background:"#f8fafc",borderRadius:"12px",padding:"12px",border:"1px solid #e2e8f0",marginBottom:"8px"}}>
