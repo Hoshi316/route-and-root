@@ -129,7 +129,7 @@ function StepCard({
   );
 }
 
-export default function MissionMap({ routeId, goal, summary, progress, steps }: Props) {
+export default function MissionMap({ routeId, goal, summary, progress, steps, phases,}: Props) {
   const [user, setUser] = useState<User | null>(null);
   const [localSteps, setLocalSteps] = useState(steps);
   const [loading, setLoading] = useState(false);
@@ -164,10 +164,8 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
 
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
-  const router = useRouter();
 
-  const sortedAsc = [...localSteps].sort((a, b) => a.scheduledDay - b.scheduledDay);
-  const sortedSteps = [...sortedAsc].reverse();
+
 
   const [openPhases, setOpenPhases] = useState<Set<number>>(() => {
     if (!phases || phases.length === 0) return new Set([0]);
@@ -276,39 +274,8 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
     setEditDescription(step.description);
   };
 
-  const handleEditSave = async (stepId: string) => {
-    const updated = localSteps.map(s =>
-      s.id === stepId ? { ...s, title: editTitle, description: editDescription } : s
-    );
-    setLocalSteps(updated);
-    setLoading(true);
-    try {
-      await fetch("/api/update-steps", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ routeId, steps: updated, feedback: { stepId: pendingStep.id, stepTitle: pendingStep.title, ...feedbackData } })
-      });
-      const varietyMap: Record<number, string> = { 1: "forest", 2: "moon", 3: "midnight", 4: "sun", 5: "rare" };
-      const variety = varietyMap[feedbackData.difficulty] || "forest";
-      const currentUser = auth.currentUser;
-      if (currentUser) {
-        await fetch("/api/save-log", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            userId: currentUser.uid, routeId, routeName: goal,
-            moodScore: feedbackData.energy ?? feedbackData.difficulty,
-            note: feedbackData.memo || `「${pendingStep.title}」を完了`, variety,
-            comment: `難易度: ${["簡単", "普通", "難しい"][feedbackData.difficulty - 1]} / ${feedbackData.feeling}`,
-            source: 'step', stepDay: pendingStep.scheduledDay, stepTitle: pendingStep.title,
-          })
-        });
-      }
-      const newProgress = Math.round((updated.filter(s => s.done).length / updated.length) * 100);
-      if (newProgress === 100) { setShowDiagnosis(true); } else { router.refresh(); }
-    } catch (e) { console.error(e); alert("更新に失敗しました"); } finally { setLoading(false); }
-    setFeedbackData({ difficulty: 3, feeling: "まあまあ", memo: "", energy: 3 });
-  };
 
-  const handleEditStart = (step: Step) => { setEditingStepId(step.id); setEditTitle(step.title); setEditDescription(step.description); };
+
   const handleEditSave = async (stepId: string) => {
     const updated = localSteps.map((s) => s.id === stepId ? { ...s, title: editTitle, description: editDescription } : s);
     setLocalSteps(updated);
@@ -532,4 +499,5 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
       </div>
     </div>
   );
+  }
 }

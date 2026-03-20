@@ -137,7 +137,10 @@ export default function Home() {
   const res = await fetch("/api/generate-plan", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ goal, durationDays, message, userId: user.uid: combined, userHistory }),
+    body: JSON.stringify({ goal, durationDays, 
+      message: combined, 
+      userId: user.uid, 
+      userHistory }),
   });
   };
 

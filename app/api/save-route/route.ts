@@ -35,6 +35,7 @@ export async function POST(req: Request) {
       steps: stepsWithState,
       progress: 0,
       createdAt: new Date().toISOString(),
+      phases: body.phases ?? [],
     };
 
     const routeId = await saveRoute(route);
