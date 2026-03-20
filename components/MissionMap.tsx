@@ -106,6 +106,13 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
     moodScores: number[];
   } | null>(null);
 
+  const [shareComment, setShareComment] = useState("");
+  const [shareGoal, setShareGoal] = useState(true);
+  const [shareDiagnosis, setShareDiagnosis] = useState(true);
+  const [shareChart, setShareChart] = useState(true);
+  const [shareToOrchard, setShareToOrchard] = useState(false);
+  const [sharePosting, setSharePosting] = useState(false);
+
   const router = useRouter();
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -460,34 +467,72 @@ export default function MissionMap({ routeId, goal, summary, progress, steps }: 
   </div>
 )}
 
-            {/* 公開チェックボックス */}
-            <div style={{ marginBottom: "16px", textAlign: "left", background: "#f8fafc", borderRadius: "12px", padding: "12px 16px", border: "1px solid #e2e8f0" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }}>
-                <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} style={{ width: "18px", height: "18px", accentColor: "#3b82f6" }} />
-                <span style={{ fontSize: "13px", fontWeight: 700, color: "#475569" }}>この旅の結果をみんなにおすそわけする 🐝</span>
-              </label>
-              <p style={{ fontSize: "10px", color: "#94a3b8", marginTop: "4px", marginLeft: "28px" }}>公開すると広場にあなたのリンゴとAI診断が表示されます</p>
-            </div>
+            {/* おすそわけフォーム */}
+<div style={{marginBottom:"16px",background:"#f8fafc",borderRadius:"12px",padding:"12px 16px",border:"1px solid #e2e8f0"}}>
+  <label style={{display:"flex",alignItems:"center",gap:"10px",cursor:"pointer",marginBottom:"10px"}}>
+    <input type="checkbox" checked={shareToOrchard} onChange={e => setShareToOrchard(e.target.checked)} style={{width:"18px",height:"18px",accentColor:"#3b82f6"}} />
+    <span style={{fontSize:"13px",fontWeight:700,color:"#475569"}}>この旅をみんなにおすそわけする 🐝</span>
+  </label>
 
-            <button
-              type="button"
-              onClick={async () => {
-                try {
-                  await fetch("/api/update-route-status", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ routeId, isPublic }),
-                  });
-                } catch (e) { console.error(e); }
-                router.push(`/collection/${routeId}`);
-              }}
-              style={{ width: "100%", padding: "16px", borderRadius: "16px", border: "none", background: "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)", color: "#fff", fontWeight: 800, fontSize: "15px", cursor: "pointer", boxShadow: "0 10px 20px rgba(37,99,235,0.3)" }}
-            >
-              貯蔵庫で情熱の結晶を確認する 📦
-            </button>
-          </div>
+  {shareToOrchard && (
+    <div style={{paddingLeft:"28px"}}>
+      <p style={{fontSize:"11px",fontWeight:700,color:"#94a3b8",marginBottom:"8px"}}>投稿する内容を選ぶ</p>
+      {([
+        {label:"目標名", value:shareGoal, set:setShareGoal},
+        {label:"AI達成診断", value:shareDiagnosis, set:setShareDiagnosis},
+        {label:"やる気グラフデータ", value:shareChart, set:setShareChart},
+      ] as {label:string,value:boolean,set:(v:boolean)=>void}[]).map(({label,value,set}) => (
+        <label key={label} style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"6px",cursor:"pointer"}}>
+          <input type="checkbox" checked={value} onChange={e => set(e.target.checked)} style={{accentColor:"#3b82f6"}} />
+          <span style={{fontSize:"12px",color:"#475569",fontWeight:600}}>{label}</span>
+        </label>
+      ))}
+      <textarea
+        placeholder="一言コメント（任意）"
+        value={shareComment}
+        onChange={e => setShareComment(e.target.value)}
+        style={{width:"100%",marginTop:"8px",padding:"10px",borderRadius:"10px",border:"1px solid #e2e8f0",fontSize:"13px",resize:"none",height:"64px",background:"white",boxSizing:"border-box" as any}}
+      />
+    </div>
+  )}
+</div>
+
+<button
+  type="button"
+  onClick={async () => {
+    try {
+      await fetch("/api/update-route-status", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ routeId, isPublic: shareToOrchard }),
+      });
+      if (shareToOrchard) {
+        setSharePosting(true);
+        await fetch("/api/share-to-orchard", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({
+            userId: user?.uid,
+            routeId,
+            goal: shareGoal ? goal : null,
+            comment: shareComment,
+            source: "completion",
+            diagnosisText: shareDiagnosis ? diagnosisText : null,
+            chartData: shareChart ? chartData : null,
+          }),
+        });
+        setSharePosting(false);
+      }
+    } catch(e) { console.error(e); }
+            router.push(`/collection/${routeId}`);
+         }}
+        style={{width:"100%",padding:"16px",borderRadius:"16px",border:"none",background:"linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)",color:"#fff",fontWeight:800,fontSize:"15px",cursor:"pointer",boxShadow:"0 10px 20px rgba(37,99,235,0.3)"}}
+          >
+        {sharePosting ? "投稿中..." : "貯蔵庫で情熱の結晶を確認する 📦"}
+        </button>
+
+        </div>
         </div>
       )}
+
 
       <style jsx>{`
         @keyframes zoomIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }

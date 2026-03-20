@@ -31,6 +31,11 @@ export default function CollectionPage() {
   const [loading, setLoading] = useState(true);
   const [selectedApple, setSelectedApple] = useState<AppleLog | null>(null);
 
+  const [showShareForm, setShowShareForm] = useState(false);
+  const [shareComment, setShareComment] = useState("");
+  const [sharing, setSharing] = useState(false);
+  const [shared, setShared] = useState(false);
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) return;
@@ -186,7 +191,12 @@ export default function CollectionPage() {
 
       {/* タイムカプセルモーダル */}
       {selectedApple && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => setSelectedApple(null)}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => {
+        setSelectedApple(null);
+        setShowShareForm(false);
+        setShareComment("");
+        setShared(false);
+          }}>
           <div className="bg-white rounded-[40px] max-w-sm w-full overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-center h-40" style={{ backgroundColor: APPLE_COLORS[selectedApple.variety] + "22" }}>
               <img src={`/images/apple-${selectedApple.variety}.svg`} alt={selectedApple.variety} className="w-28 h-28 object-contain drop-shadow-xl" />
@@ -233,13 +243,85 @@ export default function CollectionPage() {
                   <p className="text-sm text-stone-600 font-bold italic leading-relaxed">「{selectedApple.comment}」</p>
                 </div>
               )}
-              <button onClick={() => setSelectedApple(null)} className="w-full py-4 rounded-2xl font-black text-sm text-white" style={{ backgroundColor: APPLE_COLORS[selectedApple.variety] }}>
-                閉じる
-              </button>
+              <button onClick={() => {
+                setSelectedApple(null);
+                setShowShareForm(false);
+                setShareComment("");
+                setShared(false);
+                }} className="w-full py-4 rounded-2xl font-black text-sm text-white" style={{ backgroundColor: APPLE_COLORS[selectedApple.variety] }}>
+                  閉じる
+                </button>
+              
+              {/* 広場にシェア */}
+{!shared ? (
+  <div style={{marginBottom:"12px"}}>
+    {!showShareForm ? (
+      <button
+        onClick={() => setShowShareForm(true)}
+        style={{width:"100%",padding:"10px",borderRadius:"12px",border:"1.5px solid #e2e8f0",background:"#f8fafc",fontSize:"13px",fontWeight:700,color:"#64748b",cursor:"pointer"}}
+      >
+        🐝 みんなの広場にシェアする
+      </button>
+    ) : (
+      <div style={{background:"#f8fafc",borderRadius:"12px",padding:"12px",border:"1px solid #e2e8f0",marginBottom:"8px"}}>
+        <p style={{fontSize:"11px",fontWeight:700,color:"#94a3b8",marginBottom:"6px"}}>一言コメント（任意）</p>
+        <textarea
+          placeholder="このリンゴについて一言..."
+          value={shareComment}
+          onChange={e => setShareComment(e.target.value)}
+          style={{width:"100%",padding:"8px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"12px",resize:"none",height:"56px",marginBottom:"8px",boxSizing:"border-box" as any}}
+        />
+        <div style={{display:"flex",gap:"8px"}}>
+          <button
+            onClick={() => setShowShareForm(false)}
+            style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"12px",cursor:"pointer",background:"white"}}
+          >
+            キャンセル
+          </button>
+          <button
+            onClick={async () => {
+              if (!selectedApple) return;
+              setSharing(true);
+              try {
+                await fetch("/api/share-to-orchard", {
+                  method:"POST",
+                  headers:{"Content-Type":"application/json"},
+                  body: JSON.stringify({
+                    userId,
+                    routeId: selectedApple.routeId,
+                    goal: routeName,
+                    comment: shareComment,
+                    variety: selectedApple.variety,
+                    note: selectedApple.note,
+                    source: "collection",
+                    moodScore: selectedApple.moodScore,
+                    stepDay: selectedApple.stepDay,
+                    stepTitle: selectedApple.stepTitle,
+                  }),
+                });
+                setShared(true);
+                setShowShareForm(false);
+              } catch(e) { console.error(e); } finally { setSharing(false); }
+            }}
+            style={{flex:2,padding:"8px",borderRadius:"8px",background:"#3b82f6",color:"white",fontWeight:700,fontSize:"12px",border:"none",cursor:"pointer"}}
+          >
+            {sharing ? "投稿中..." : "投稿する 🐝"}
+          </button>
+        </div>
+      </div>
+    )}
+  </div>
+) : (
+  <div style={{marginBottom:"12px",textAlign:"center",padding:"10px",background:"#f0fdf4",borderRadius:"12px",border:"1px solid #86efac"}}>
+    <span style={{fontSize:"13px",fontWeight:700,color:"#16a34a"}}>🎉 広場に投稿しました！</span>
+  </div>
+)}
             </div>
           </div>
         </div>
       )}
+
+  
 
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
         <Link href={`/garden/${routeId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
