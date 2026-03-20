@@ -1,0 +1,3674 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+app/
+  api/
+    generate-apple/
+      route.ts
+    generate-plan/
+      route.ts
+    get-route/
+      route.ts
+    save-log/
+      route.ts
+    save-route/
+      route.ts
+    update-route-progress/
+      route.ts
+    update-steps/
+      route.ts
+  collection/
+    [userId]/
+      page.tsx
+  garden/
+    [routeId]/
+      page.tsx
+  history/
+    page.tsx
+  map/
+    [routeId]/
+      page.tsx
+  favicon.ico
+  globals.css
+  layout.tsx
+  page.tsx
+components/
+  Apple.tsx
+  AppleTree.tsx
+  HarvestModal.tsx
+  Header.tsx
+  MissionMap.tsx
+lib/
+  apple.ts
+  auth.ts
+  firebase.ts
+  firestore.ts
+  googleTasks.ts
+public/
+  images/
+    apple-forest.svg
+    apple-midnight.svg
+    apple-moon.svg
+    apple-rare.svg
+    apple-sun.svg
+  file.svg
+  globe.svg
+  next.svg
+  vercel.svg
+  window.svg
+types/
+  log.ts
+  route.ts
+.gitignore
+eslint.config.mjs
+next.config.ts
+package.json
+postcss.config.mjs
+README.md
+tsconfig.json
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="app/api/get-route/route.ts">
+// app/api/get-route/route.ts
+import { db } from "@/lib/firebase";
+import { doc, getDoc } from "firebase/firestore";
+
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const routeId = searchParams.get("routeId");
+
+  if (!routeId) return Response.json({ error: "routeIdが必要" }, { status: 400 });
+
+  try {
+    const routeRef = doc(db, "routes", routeId);
+    const routeSnap = await getDoc(routeRef);
+
+    if (!routeSnap.exists()) {
+      return Response.json({ error: "ルートが見つかりません" }, { status: 404 });
+    }
+
+    // goal(目標名), nutrition(養分), pendingApples(未収穫リンゴ) などを返す
+    return Response.json({ id: routeSnap.id, ...routeSnap.data() });
+  } catch (error) {
+    console.error(error);
+    return Response.json({ error: "取得失敗" }, { status: 500 });
+  }
+}
+</file>
+
+<file path="app/api/save-route/route.ts">
+import { saveRoute } from "@/lib/firestore";
+import { RouteDoc } from "@/types/route";
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json();
+    const { userId, goal, durationDays, message, summary, steps } = body;
+
+    if (!userId || !goal || !durationDays || !summary || !steps) {
+      return Response.json(
+        { error: "必要なデータが不足しています" },
+        { status: 400 }
+      );
+    }
+
+    const stepsWithState = steps.map(
+      (
+        step: { title: string; description: string; scheduledDay: number },
+        index: number
+      ) => ({
+        id: crypto.randomUUID(),
+        title: step.title,
+        description: step.description,
+        scheduledDay: step.scheduledDay,
+        done: false,
+      })
+    );
+
+    const route: RouteDoc = {
+      userId,
+      goal,
+      durationDays,
+      message: message ?? "",
+      summary,
+      steps: stepsWithState,
+      progress: 0,
+      createdAt: new Date().toISOString(),
+    };
+
+    const routeId = await saveRoute(route);
+
+    return Response.json({ routeId });
+  } catch (error) {
+    console.error(error);
+    return Response.json(
+      { error: "ルートの保存に失敗しました" },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="app/api/update-route-progress/route.ts">
+// app/api/update-route-progress/route.ts
+import { db } from "@/lib/firebase";
+import { doc, updateDoc } from "firebase/firestore";
+
+export async function POST(req: Request) {
+  try {
+    const { routeId, nutrition, pendingApples, variety, hasGrown} = await req.json();
+
+    if (!routeId) return Response.json({ error: "routeIdが必要" }, { status: 400 });
+
+    const routeRef = doc(db, "routes", routeId);
+    
+    // 農園の状態（成長度、リンゴ、今の品種）をFirestoreに上書き保存
+    await updateDoc(routeRef, {
+      nutrition: nutrition,
+      pendingApples: pendingApples,
+      currentVariety: variety,
+      hasGrown: hasGrown
+    });
+
+    return Response.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    return Response.json({ error: "保存失敗" }, { status: 500 });
+  }
+}
+</file>
+
+<file path="app/api/update-steps/route.ts">
+import { updateStepDone } from "@/lib/firestore";
+
+export async function POST(req: Request) {
+  try {
+    const { routeId, steps } = await req.json();
+
+    if (!routeId || !steps) {
+      return Response.json(
+        { error: "routeId と steps は必須です" },
+        { status: 400 }
+      );
+    }
+
+    await updateStepDone(routeId, steps);
+
+    return Response.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    return Response.json(
+      { error: "ステップ更新に失敗しました" },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="app/globals.css">
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+</file>
+
+<file path="app/layout.tsx">
+import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+export const metadata: Metadata = {
+  title: "Create Next App",
+  description: "Generated by create next app",
+};
+
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  return (
+    <html lang="en">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+      >
+        {children}
+      </body>
+    </html>
+  );
+}
+</file>
+
+<file path="lib/auth.ts">
+import { GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
+import { auth } from "./firebase";
+
+const provider = new GoogleAuthProvider();
+
+export async function signInWithGoogle() {
+  const result = await signInWithPopup(auth, provider);
+  return result.user;
+}
+
+export async function logout() {
+  await signOut(auth);
+}
+
+export async function getGoogleTasksAccessToken() {
+  const provider = new GoogleAuthProvider();
+  provider.addScope("https://www.googleapis.com/auth/tasks");
+
+  const result = await signInWithPopup(auth, provider);
+  const credential = GoogleAuthProvider.credentialFromResult(result);
+  return credential?.accessToken ?? null;
+}
+</file>
+
+<file path="lib/firebase.ts">
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY!,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN!,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID!,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET!,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID!,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID!,
+};
+
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+
+export const auth = getAuth(app);
+export const db = getFirestore(app);
+export default app;
+</file>
+
+<file path="lib/googleTasks.ts">
+import { Step } from "@/types/route";
+
+export async function exportToGoogleTasks(
+  accessToken: string,
+  goal: string,
+  steps: Step[]
+): Promise<void> {
+  const base = "https://tasks.googleapis.com/tasks/v1";
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+
+  // 1. タスクリストを作成
+  const listRes = await fetch(`${base}/users/@me/lists`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ title: `Route & Root: ${goal}` }),
+  });
+
+  if (!listRes.ok) {
+    const err = await listRes.json();
+    throw new Error(err.error?.message ?? "タスクリストの作成に失敗しました");
+  }
+
+  const list = await listRes.json();
+  const taskListId: string = list.id;
+
+  // 2. stepsを順番に追加
+  for (const step of steps) {
+    const taskRes = await fetch(`${base}/lists/${taskListId}/tasks`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: `Day${step.scheduledDay}: ${step.title}`,
+        notes: step.description,
+        status: step.done ? "completed" : "needsAction",
+      }),
+    });
+
+    if (!taskRes.ok) {
+      const err = await taskRes.json();
+      throw new Error(err.error?.message ?? `ステップ「${step.title}」の追加に失敗しました`);
+    }
+  }
+}
+</file>
+
+<file path="public/images/apple-forest.svg">
+<svg width="388" height="426" viewBox="0 0 388 426" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_d_1_59)">
+<path d="M383.129 232.48C383.129 353.257 316.629 451.48 199.629 404.48C87.1292 455.98 8.12908 351.48 4.12912 232.48C0.129157 113.48 89.6353 70.4804 193.32 117.48C311.098 78.4804 383.129 105.98 383.129 232.48Z" fill="url(#paint0_radial_1_59)"/>
+</g>
+<path d="M230.065 31.56L202.857 127.967L187.758 127.44L192.172 1.01684L230.065 31.56Z" fill="url(#paint1_linear_1_59)" stroke="#904401"/>
+<g filter="url(#filter1_f_1_59)">
+<ellipse cx="66.8604" cy="169.887" rx="29.4432" ry="17.4888" transform="rotate(108 66.8604 169.887)" fill="#D9D9D9" fill-opacity="0.4"/>
+</g>
+<g filter="url(#filter2_f_1_59)">
+<path d="M258.898 123.328C259.247 127.771 240.177 145.755 214.408 149.213C184.105 151.599 152.009 141.693 151.66 137.249C151.31 132.806 176.571 140.526 211.629 140.384C234.479 139.537 258.548 118.884 258.898 123.328Z" fill="#D9D9D9" fill-opacity="0.5"/>
+</g>
+<defs>
+<filter id="filter0_d_1_59" x="0" y="98.8149" width="387.129" height="327.138" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="4"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_59"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_59" result="shape"/>
+</filter>
+<filter id="filter1_f_1_59" x="37.8981" y="131.363" width="57.9246" height="77.0484" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_59"/>
+</filter>
+<filter id="filter2_f_1_59" x="141.656" y="112.702" width="127.246" height="46.8762" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_59"/>
+</filter>
+<radialGradient id="paint0_radial_1_59" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(149.129 192.48) rotate(120.784) scale(273.542 161.196)">
+<stop offset="0.0236961" stop-color="#81C784"/>
+<stop offset="1" stop-color="#1B5E20"/>
+</radialGradient>
+<linearGradient id="paint1_linear_1_59" x1="224.629" y1="94.9804" x2="207.228" y2="128.62" gradientUnits="userSpaceOnUse">
+<stop offset="0.163462" stop-color="#904401"/>
+<stop offset="1" stop-color="#2A1400"/>
+</linearGradient>
+</defs>
+</svg>
+</file>
+
+<file path="public/images/apple-midnight.svg">
+<svg width="388" height="426" viewBox="0 0 388 426" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_d_1_47)">
+<path d="M383.129 232.48C383.129 353.257 316.629 451.48 199.629 404.48C87.1292 455.98 8.12908 351.48 4.12912 232.48C0.129157 113.48 89.6353 70.4804 193.32 117.48C311.098 78.4804 383.129 105.98 383.129 232.48Z" fill="url(#paint0_radial_1_47)"/>
+</g>
+<path d="M230.065 31.56L202.857 127.967L187.758 127.44L192.172 1.01684L230.065 31.56Z" fill="url(#paint1_linear_1_47)" stroke="#904401"/>
+<g filter="url(#filter1_f_1_47)">
+<ellipse cx="66.8604" cy="169.887" rx="29.4432" ry="17.4888" transform="rotate(108 66.8604 169.887)" fill="#D9D9D9" fill-opacity="0.1"/>
+</g>
+<g filter="url(#filter2_f_1_47)">
+<path d="M258.898 123.328C259.247 127.771 240.177 145.755 214.408 149.213C184.105 151.599 152.009 141.693 151.66 137.249C151.31 132.806 176.571 140.525 211.629 140.384C234.479 139.537 258.548 118.884 258.898 123.328Z" fill="#D9D9D9" fill-opacity="0.2"/>
+</g>
+<defs>
+<filter id="filter0_d_1_47" x="0" y="98.8149" width="387.129" height="327.138" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="4"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_47"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_47" result="shape"/>
+</filter>
+<filter id="filter1_f_1_47" x="37.8982" y="131.363" width="57.9246" height="77.0484" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_47"/>
+</filter>
+<filter id="filter2_f_1_47" x="141.656" y="112.702" width="127.246" height="46.8762" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_47"/>
+</filter>
+<radialGradient id="paint0_radial_1_47" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(149.129 192.48) rotate(120.784) scale(273.542 161.196)">
+<stop offset="0.0236961" stop-color="#6A5ACD"/>
+<stop offset="1" stop-color="#191970"/>
+</radialGradient>
+<linearGradient id="paint1_linear_1_47" x1="224.629" y1="94.9804" x2="207.228" y2="128.62" gradientUnits="userSpaceOnUse">
+<stop offset="0.163462" stop-color="#904401"/>
+<stop offset="1" stop-color="#2A1400"/>
+</linearGradient>
+</defs>
+</svg>
+</file>
+
+<file path="public/images/apple-moon.svg">
+<svg width="388" height="426" viewBox="0 0 388 426" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_d_1_37)">
+<path d="M383.129 232.48C383.129 353.257 316.629 451.48 199.629 404.48C87.1292 455.98 8.12908 351.48 4.12912 232.48C0.129157 113.48 89.6353 70.4804 193.32 117.48C311.098 78.4804 383.129 105.98 383.129 232.48Z" fill="url(#paint0_radial_1_37)"/>
+</g>
+<path d="M230.065 31.56L202.857 127.967L187.758 127.44L192.172 1.01684L230.065 31.56Z" fill="url(#paint1_linear_1_37)" stroke="#904401"/>
+<g filter="url(#filter1_f_1_37)">
+<ellipse cx="66.8604" cy="169.887" rx="29.4432" ry="17.4888" transform="rotate(108 66.8604 169.887)" fill="#D9D9D9" fill-opacity="0.4"/>
+</g>
+<g filter="url(#filter2_f_1_37)">
+<path d="M258.898 123.328C259.247 127.771 240.177 145.755 214.408 149.213C184.105 151.599 152.009 141.693 151.66 137.249C151.31 132.806 176.571 140.525 211.629 140.384C234.479 139.537 258.548 118.884 258.898 123.328Z" fill="#D9D9D9" fill-opacity="0.5"/>
+</g>
+<defs>
+<filter id="filter0_d_1_37" x="0" y="98.8149" width="387.129" height="327.138" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="4"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_37"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_37" result="shape"/>
+</filter>
+<filter id="filter1_f_1_37" x="37.8982" y="131.363" width="57.9246" height="77.0484" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_37"/>
+</filter>
+<filter id="filter2_f_1_37" x="141.656" y="112.702" width="127.246" height="46.8763" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_37"/>
+</filter>
+<radialGradient id="paint0_radial_1_37" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(149.129 192.48) rotate(120.784) scale(273.542 161.196)">
+<stop offset="0.0236961" stop-color="#E0E0E0"/>
+<stop offset="1" stop-color="#757575"/>
+</radialGradient>
+<linearGradient id="paint1_linear_1_37" x1="224.629" y1="94.9804" x2="207.228" y2="128.62" gradientUnits="userSpaceOnUse">
+<stop offset="0.163462" stop-color="#904401"/>
+<stop offset="1" stop-color="#2A1400"/>
+</linearGradient>
+</defs>
+</svg>
+</file>
+
+<file path="public/images/apple-rare.svg">
+<svg width="388" height="426" viewBox="0 0 388 426" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_d_1_42)">
+<path d="M383.129 232.48C383.129 353.257 316.629 451.48 199.629 404.48C87.1292 455.98 8.12908 351.48 4.12912 232.48C0.129157 113.48 89.6353 70.4804 193.32 117.48C311.098 78.4804 383.129 105.98 383.129 232.48Z" fill="url(#paint0_radial_1_42)"/>
+</g>
+<path d="M230.065 31.56L202.857 127.967L187.758 127.44L192.172 1.01684L230.065 31.56Z" fill="url(#paint1_linear_1_42)" stroke="#904401"/>
+<g filter="url(#filter1_f_1_42)">
+<ellipse cx="66.8604" cy="169.887" rx="29.4432" ry="17.4888" transform="rotate(108 66.8604 169.887)" fill="#D9D9D9" fill-opacity="0.4"/>
+</g>
+<g filter="url(#filter2_f_1_42)">
+<path d="M258.898 123.328C259.247 127.771 240.177 145.755 214.408 149.213C184.105 151.599 152.009 141.693 151.66 137.249C151.31 132.806 176.571 140.525 211.629 140.384C234.479 139.537 258.548 118.884 258.898 123.328Z" fill="#D9D9D9" fill-opacity="0.5"/>
+</g>
+<defs>
+<filter id="filter0_d_1_42" x="0" y="98.8149" width="387.129" height="327.138" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="4"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_42"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_42" result="shape"/>
+</filter>
+<filter id="filter1_f_1_42" x="37.8982" y="131.363" width="57.9246" height="77.0484" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_42"/>
+</filter>
+<filter id="filter2_f_1_42" x="141.656" y="112.702" width="127.246" height="46.8763" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_42"/>
+</filter>
+<radialGradient id="paint0_radial_1_42" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(149.129 192.48) rotate(120.784) scale(273.542 161.196)">
+<stop offset="0.0236961" stop-color="#F9F762"/>
+<stop offset="1" stop-color="#CEA500"/>
+</radialGradient>
+<linearGradient id="paint1_linear_1_42" x1="224.629" y1="94.9804" x2="207.228" y2="128.62" gradientUnits="userSpaceOnUse">
+<stop offset="0.163462" stop-color="#904401"/>
+<stop offset="1" stop-color="#2A1400"/>
+</linearGradient>
+</defs>
+</svg>
+</file>
+
+<file path="public/images/apple-sun.svg">
+<svg width="388" height="426" viewBox="0 0 388 426" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g filter="url(#filter0_d_1_12)">
+<path d="M383.129 232.48C383.129 353.257 316.629 451.48 199.629 404.48C87.1292 455.98 8.12908 351.48 4.12912 232.48C0.129157 113.48 89.6353 70.4804 193.32 117.48C311.098 78.4804 383.129 105.98 383.129 232.48Z" fill="url(#paint0_radial_1_12)"/>
+</g>
+<path d="M230.065 31.56L202.857 127.967L187.758 127.44L192.172 1.01684L230.065 31.56Z" fill="url(#paint1_linear_1_12)" stroke="#904401"/>
+<g filter="url(#filter1_f_1_12)">
+<ellipse cx="66.8604" cy="169.887" rx="29.4432" ry="17.4888" transform="rotate(108 66.8604 169.887)" fill="#D9D9D9" fill-opacity="0.4"/>
+</g>
+<g filter="url(#filter2_f_1_12)">
+<path d="M258.898 123.328C259.247 127.771 240.177 145.755 214.408 149.213C184.105 151.599 152.009 141.693 151.66 137.249C151.31 132.806 176.571 140.525 211.629 140.384C234.479 139.537 258.548 118.884 258.898 123.328Z" fill="#D9D9D9" fill-opacity="0.5"/>
+</g>
+<defs>
+<filter id="filter0_d_1_12" x="0" y="98.8149" width="387.129" height="327.138" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="4"/>
+<feGaussianBlur stdDeviation="2"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.25 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_12"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_12" result="shape"/>
+</filter>
+<filter id="filter1_f_1_12" x="37.8981" y="131.363" width="57.9246" height="77.0484" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_12"/>
+</filter>
+<filter id="filter2_f_1_12" x="141.656" y="112.702" width="127.246" height="46.8763" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape"/>
+<feGaussianBlur stdDeviation="5" result="effect1_foregroundBlur_1_12"/>
+</filter>
+<radialGradient id="paint0_radial_1_12" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(149.129 192.48) rotate(120.784) scale(273.542 161.196)">
+<stop offset="0.0236961" stop-color="#FF0000"/>
+<stop offset="1" stop-color="#990000"/>
+</radialGradient>
+<linearGradient id="paint1_linear_1_12" x1="224.629" y1="94.9804" x2="207.228" y2="128.62" gradientUnits="userSpaceOnUse">
+<stop offset="0.163462" stop-color="#904401"/>
+<stop offset="1" stop-color="#2A1400"/>
+</linearGradient>
+</defs>
+</svg>
+</file>
+
+<file path="public/file.svg">
+<svg fill="none" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path d="M14.5 13.5V5.41a1 1 0 0 0-.3-.7L9.8.29A1 1 0 0 0 9.08 0H1.5v13.5A2.5 2.5 0 0 0 4 16h8a2.5 2.5 0 0 0 2.5-2.5m-1.5 0v-7H8v-5H3v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1M9.5 5V2.12L12.38 5zM5.13 5h-.62v1.25h2.12V5zm-.62 3h7.12v1.25H4.5zm.62 3h-.62v1.25h7.12V11z" clip-rule="evenodd" fill="#666" fill-rule="evenodd"/></svg>
+</file>
+
+<file path="public/globe.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><g clip-path="url(#a)"><path fill-rule="evenodd" clip-rule="evenodd" d="M10.27 14.1a6.5 6.5 0 0 0 3.67-3.45q-1.24.21-2.7.34-.31 1.83-.97 3.1M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16m.48-1.52a7 7 0 0 1-.96 0H7.5a4 4 0 0 1-.84-1.32q-.38-.89-.63-2.08a40 40 0 0 0 3.92 0q-.25 1.2-.63 2.08a4 4 0 0 1-.84 1.31zm2.94-4.76q1.66-.15 2.95-.43a7 7 0 0 0 0-2.58q-1.3-.27-2.95-.43a18 18 0 0 1 0 3.44m-1.27-3.54a17 17 0 0 1 0 3.64 39 39 0 0 1-4.3 0 17 17 0 0 1 0-3.64 39 39 0 0 1 4.3 0m1.1-1.17q1.45.13 2.69.34a6.5 6.5 0 0 0-3.67-3.44q.65 1.26.98 3.1M8.48 1.5l.01.02q.41.37.84 1.31.38.89.63 2.08a40 40 0 0 0-3.92 0q.25-1.2.63-2.08a4 4 0 0 1 .85-1.32 7 7 0 0 1 .96 0m-2.75.4a6.5 6.5 0 0 0-3.67 3.44 29 29 0 0 1 2.7-.34q.31-1.83.97-3.1M4.58 6.28q-1.66.16-2.95.43a7 7 0 0 0 0 2.58q1.3.27 2.95.43a18 18 0 0 1 0-3.44m.17 4.71q-1.45-.12-2.69-.34a6.5 6.5 0 0 0 3.67 3.44q-.65-1.27-.98-3.1" fill="#666"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h16v16H0z"/></clipPath></defs></svg>
+</file>
+
+<file path="public/next.svg">
+<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 394 80"><path fill="#000" d="M262 0h68.5v12.7h-27.2v66.6h-13.6V12.7H262V0ZM149 0v12.7H94v20.4h44.3v12.6H94v21h55v12.6H80.5V0h68.7zm34.3 0h-17.8l63.8 79.4h17.9l-32-39.7 32-39.6h-17.9l-23 28.6-23-28.6zm18.3 56.7-9-11-27.1 33.7h17.8l18.3-22.7z"/><path fill="#000" d="M81 79.3 17 0H0v79.3h13.6V17l50.2 62.3H81Zm252.6-.4c-1 0-1.8-.4-2.5-1s-1.1-1.6-1.1-2.6.3-1.8 1-2.5 1.6-1 2.6-1 1.8.3 2.5 1a3.4 3.4 0 0 1 .6 4.3 3.7 3.7 0 0 1-3 1.8zm23.2-33.5h6v23.3c0 2.1-.4 4-1.3 5.5a9.1 9.1 0 0 1-3.8 3.5c-1.6.8-3.5 1.3-5.7 1.3-2 0-3.7-.4-5.3-1s-2.8-1.8-3.7-3.2c-.9-1.3-1.4-3-1.4-5h6c.1.8.3 1.6.7 2.2s1 1.2 1.6 1.5c.7.4 1.5.5 2.4.5 1 0 1.8-.2 2.4-.6a4 4 0 0 0 1.6-1.8c.3-.8.5-1.8.5-3V45.5zm30.9 9.1a4.4 4.4 0 0 0-2-3.3 7.5 7.5 0 0 0-4.3-1.1c-1.3 0-2.4.2-3.3.5-.9.4-1.6 1-2 1.6a3.5 3.5 0 0 0-.3 4c.3.5.7.9 1.3 1.2l1.8 1 2 .5 3.2.8c1.3.3 2.5.7 3.7 1.2a13 13 0 0 1 3.2 1.8 8.1 8.1 0 0 1 3 6.5c0 2-.5 3.7-1.5 5.1a10 10 0 0 1-4.4 3.5c-1.8.8-4.1 1.2-6.8 1.2-2.6 0-4.9-.4-6.8-1.2-2-.8-3.4-2-4.5-3.5a10 10 0 0 1-1.7-5.6h6a5 5 0 0 0 3.5 4.6c1 .4 2.2.6 3.4.6 1.3 0 2.5-.2 3.5-.6 1-.4 1.8-1 2.4-1.7a4 4 0 0 0 .8-2.4c0-.9-.2-1.6-.7-2.2a11 11 0 0 0-2.1-1.4l-3.2-1-3.8-1c-2.8-.7-5-1.7-6.6-3.2a7.2 7.2 0 0 1-2.4-5.7 8 8 0 0 1 1.7-5 10 10 0 0 1 4.3-3.5c2-.8 4-1.2 6.4-1.2 2.3 0 4.4.4 6.2 1.2 1.8.8 3.2 2 4.3 3.4 1 1.4 1.5 3 1.5 5h-5.8z"/></svg>
+</file>
+
+<file path="public/vercel.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1155 1000"><path d="m577.3 0 577.4 1000H0z" fill="#fff"/></svg>
+</file>
+
+<file path="public/window.svg">
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path fill-rule="evenodd" clip-rule="evenodd" d="M1.5 2.5h13v10a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1zM0 1h16v11.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 0 12.5zm3.75 4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5M7 4.75a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0m1.75.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5" fill="#666"/></svg>
+</file>
+
+<file path="types/route.ts">
+export type Step = {
+  id: string;
+  title: string;
+  description: string;
+  scheduledDay: number;
+  done: boolean;
+};
+
+export type RoutePlan = {
+  goal: string;
+  summary: string;
+  steps: {
+    title: string;
+    description: string;
+    scheduledDay: number;
+  }[];
+};
+
+export type RouteDoc = {
+  userId: string;
+  goal: string;
+  durationDays: number;
+  message: string;
+  summary: string;
+  steps: Step[];
+  progress: number;
+  createdAt: string;
+  phases?: Phase[];
+};
+</file>
+
+<file path=".gitignore">
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+</file>
+
+<file path="eslint.config.mjs">
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+  ]),
+]);
+
+export default eslintConfig;
+</file>
+
+<file path="next.config.ts">
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+</file>
+
+<file path="postcss.config.mjs">
+const config = {
+  plugins: {
+    "@tailwindcss/postcss": {},
+  },
+};
+
+export default config;
+</file>
+
+<file path="tsconfig.json">
+{
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "incremental": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules"]
+}
+</file>
+
+<file path="app/history/page.tsx">
+"use client";
+
+import { useEffect, useState } from "react";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { getUserRoutes } from "@/lib/firestore";
+import { RouteDoc } from "@/types/route";
+import Link from "next/link";
+
+type RouteWithId = RouteDoc & { id: string };
+
+export default function HistoryPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [routes, setRoutes] = useState<RouteWithId[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<"active" | "done">("active");
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        try {
+          const data = await getUserRoutes(currentUser.uid);
+          setRoutes(data);
+        } catch (err) {
+          console.error(err);
+        }
+      }
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const filteredRoutes = routes.filter((r) =>
+    tab === "active" ? r.progress < 100 : r.progress === 100
+  );
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-amber-50">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-orange-500 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-amber-50">
+        <p className="font-bold text-gray-500">ログインしてください</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-amber-50 p-6 pb-24">
+      <div className="mx-auto max-w-2xl">
+
+        {/* ヘッダー */}
+        <div className="mb-6 flex items-end justify-between">
+          <div>
+            <h1 className="text-3xl font-black text-orange-900">📜 旅の記録</h1>
+            <p className="mt-1 text-sm text-orange-600/70">これまでの目標一覧</p>
+          </div>
+          <Link
+            href="/"
+            className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-gray-500 shadow hover:bg-gray-50"
+          >
+            ＋ 新しい旅へ
+          </Link>
+        </div>
+
+        {/* タブ */}
+        <div className="mb-6 flex gap-2">
+          <button
+            onClick={() => setTab("active")}
+            className={`rounded-full px-5 py-2 text-sm font-bold transition ${
+              tab === "active"
+                ? "bg-orange-500 text-white shadow-md"
+                : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            🚶 進行中
+            {routes.filter(r => r.progress < 100).length > 0 && (
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                tab === "active" ? "bg-white/30 text-white" : "bg-orange-100 text-orange-600"
+              }`}>
+                {routes.filter(r => r.progress < 100).length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setTab("done")}
+            className={`rounded-full px-5 py-2 text-sm font-bold transition ${
+              tab === "done"
+                ? "bg-emerald-500 text-white shadow-md"
+                : "bg-white text-gray-500 border border-gray-200 hover:bg-gray-50"
+            }`}
+          >
+            ✅ 完了
+            {routes.filter(r => r.progress === 100).length > 0 && (
+              <span className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                tab === "done" ? "bg-white/30 text-white" : "bg-emerald-100 text-emerald-600"
+              }`}>
+                {routes.filter(r => r.progress === 100).length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* ルート一覧 */}
+        {filteredRoutes.length === 0 ? (
+          <div className="rounded-3xl border-4 border-dashed border-orange-100 bg-white py-16 text-center">
+            <p className="text-slate-400">
+              {tab === "active" ? "進行中の旅はありません。" : "完了した旅はまだありません。"}
+            </p>
+            {tab === "active" && (
+              <Link href="/" className="mt-4 inline-block font-bold text-orange-500 underline">
+                新しい旅を始める
+              </Link>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredRoutes.map((route) => {
+              const completedCount = route.steps.filter((s) => s.done).length;
+              const totalCount = route.steps.length;
+              const progressPercent =
+                totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 100);
+              const isCompleted = progressPercent === 100;
+              const createdDate = new Date(route.createdAt).toLocaleDateString("ja-JP");
+
+              return (
+                <div
+                  key={route.id}
+                  className={`rounded-2xl border-2 bg-white p-5 shadow-sm transition hover:shadow-md ${
+                    isCompleted ? "border-emerald-200" : "border-orange-100"
+                  }`}
+                >
+                  {/* 目標名 + 状態バッジ */}
+                  <div className="mb-3 flex items-start justify-between gap-2">
+                    <h2 className="text-lg font-black text-slate-800">{route.goal}</h2>
+                    <span
+                      className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+                        isCompleted
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-orange-100 text-orange-700"
+                      }`}
+                    >
+                      {isCompleted ? "✅ 完了" : "🚶 進行中"}
+                    </span>
+                  </div>
+
+                  {/* 進捗バー */}
+                  <div className="mb-3">
+                    <div className="mb-1 flex justify-between text-xs text-gray-400">
+                      <span>{completedCount}/{totalCount} ステップ完了</span>
+                      <span>{progressPercent}%</span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          isCompleted ? "bg-emerald-400" : "bg-orange-400"
+                        }`}
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* メタ情報 */}
+                  <p className="mb-4 text-xs text-gray-400">
+                    📅 {createdDate}　／　{route.durationDays}日間プラン
+                  </p>
+
+                  {/* アクションボタン */}
+                  <div className="flex gap-2">
+                    <Link
+                      href={`/map/${route.id}`}
+                      className="flex-1 rounded-xl bg-orange-500 py-2 text-center text-sm font-bold text-white transition hover:bg-orange-600"
+                    >
+                      🗺️ マップを見る
+                    </Link>
+                    <Link
+                      href={`/garden/${route.id}`}
+                      className="flex-1 rounded-xl bg-emerald-500 py-2 text-center text-sm font-bold text-white transition hover:bg-emerald-600"
+                    >
+                      🍎 農園へ
+                    </Link>
+                    <Link
+                      href={`/collection/${user.uid}?from=${route.id}`}
+                      className="flex-1 rounded-xl bg-slate-200 py-2 text-center text-sm font-bold text-slate-600 transition hover:bg-slate-300"
+                    >
+                      📦 リンゴ
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="app/map/[routeId]/page.tsx">
+import { getRoute } from "@/lib/firestore";
+import MissionMap from "@/components/MissionMap";
+
+type PageProps = {
+  params: Promise<{
+    routeId: string;
+  }>;
+};
+
+export default async function MapPage({ params }: PageProps) {
+  const { routeId } = await params;
+  const route = await getRoute(routeId);
+
+  const typedRoute = route as {
+    id: string;
+    goal: string;
+    summary: string;
+    progress: number;
+    steps: {
+      id: string;
+      title: string;
+      description: string;
+      scheduledDay: number;
+      done: boolean;
+    }[];
+    phases?: {
+    title: string;
+    startDay: number;
+    endDay: number;
+    description: string;
+  }[];
+  };
+
+  return (
+    <MissionMap
+      routeId={routeId}
+      goal={typedRoute.goal}
+      summary={typedRoute.summary}
+      progress={typedRoute.progress}
+      steps={typedRoute.steps}
+      phases={typedRoute.phases}
+    />
+  );
+}
+</file>
+
+<file path="components/Apple.tsx">
+// components/Apple.tsx
+type Props = {
+  variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
+  moodScore: number; // 1〜5
+};
+
+export default function Apple({ variety, moodScore }: Props) {
+  // 仕様書 8.1 のサイズ定義を適用
+  const sizeMap: Record<number, number> = {
+    1: 60,
+    2: 75,
+    3: 90,
+    4: 105,
+    5: 120
+  };
+
+  const size = sizeMap[moodScore] || 90;
+
+  return (
+    <img 
+      src={`/images/apple-${variety}.svg`} 
+      alt={variety} 
+      style={{ width: `${size}px`, height: 'auto' }}
+      className="drop-shadow-xl animate-bounce-slow"
+    />
+  );
+}
+</file>
+
+<file path="components/AppleTree.tsx">
+"use client";
+import Apple from "./Apple";
+import { useState, useEffect } from "react";
+
+type AppleTreeProps = {
+  level: number;
+  variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
+  hasApple: boolean;
+  moodScore: number;
+};
+
+export default function AppleTree({ level, variety, hasApple, moodScore }: AppleTreeProps) {
+  const [imgError, setImgError] = useState(false);
+  const treeImagePath = `/images/tree-${level}.svg`;
+
+  // レベルが変わったらエラー状態をリセットする
+  useEffect(() => {
+    setImgError(false);
+  }, [level]);
+
+  return (
+    <div className="relative flex flex-col items-center justify-center w-80 h-80">
+      {/* 木の見た目 */}
+      <div className="text-8xl flex items-center justify-center transition-all duration-500">
+        {!imgError ? (
+          <img 
+            src={treeImagePath} 
+            alt={`Tree Level ${level}`} 
+            className="w-64 h-64 object-contain"
+            onError={() => setImgError(true)} // 画像がない時にエラーを検知
+          />
+        ) : (
+          /* 画像がない時のバックアップ（絵文字） */
+          <div className="animate-pulse">
+            {level === 0 && "🌱"}
+            {level === 1 && "🎋"}
+            {level >= 2 && "🌳"}
+          </div>
+        )}
+      </div>
+
+      {/* リンゴの実 */}
+      {level >= 2 && hasApple && (
+        <div className="absolute top-12 animate-bounce">
+           <Apple variety={variety} moodScore={moodScore} />
+        </div>
+      )}
+
+      {/* 地面の影 */}
+      <div className="mt-4 w-32 h-4 bg-orange-200/50 rounded-full blur-sm"></div>
+    </div>
+  );
+}
+</file>
+
+<file path="components/HarvestModal.tsx">
+// components/HarvestModal.tsx
+import { AppleVariety, APPLE_NAMES } from "@/lib/apple"; // ★ 共通定義を使う
+
+type Props = {
+  apples: { variety: AppleVariety; note: string; comment?: string }[];
+  onClose: () => void;
+};
+
+export default function HarvestModal({ apples, onClose }: Props) {
+  // 収穫されたリンゴの総数
+  const totalCount = apples.length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300 p-4">
+      <div className="bg-white p-8 rounded-[40px] shadow-2xl text-center max-w-md w-full animate-in zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto">
+        
+        <div className="mb-2 text-4xl">🧺</div>
+        <h2 className="text-2xl font-black text-slate-800 mb-2">大収穫だ！</h2>
+        <p className="text-slate-500 text-sm mb-6">
+          {totalCount}個のリンゴを貯蔵庫へ運びました。
+        </p>
+        
+        {/* ★ リンゴたちのグリッド表示 */}
+        <div className="grid grid-cols-3 gap-4 mb-8 bg-orange-50/50 p-6 rounded-[30px] border-2 border-orange-100">
+          {apples.map((apple, index) => (
+            <div key={index} className="flex flex-col items-center animate-in slide-in-from-bottom-2 duration-500" style={{ animationDelay: `${index * 100}ms` }}>
+              <img 
+                src={`/images/apple-${apple.variety}.svg`} 
+                alt={apple.variety} 
+                className="w-16 h-16 object-contain drop-shadow-md hover:scale-110 transition-transform"
+              />
+              <span className="text-[8px] font-black text-orange-400 mt-1 uppercase">
+                {APPLE_NAMES[apple.variety]}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* まとめメッセージ */}
+        <div className="bg-slate-50 p-4 rounded-2xl mb-8 text-left">
+          <p className="text-[10px] font-black text-slate-400 uppercase mb-2">今回の収穫メモ</p>
+          <ul className="space-y-1">
+            {apples.slice(0, 3).map((apple, i) => (
+              <li key={i} className="text-xs text-slate-600 font-bold truncate">
+                • {apple.note || "（メモなし）"}
+              </li>
+            ))}
+            {totalCount > 3 && <li className="text-[10px] text-slate-400 font-bold ml-3">...他 {totalCount - 3}件</li>}
+          </ul>
+        </div>
+
+        <button 
+          onClick={onClose}
+          className="w-full py-4 bg-orange-500 text-white font-black rounded-2xl shadow-lg hover:bg-orange-600 transition-all active:scale-95"
+        >
+          農園を整える
+        </button>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="components/Header.tsx">
+"use client";
+
+import { useEffect, useState } from "react";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { signInWithGoogle, logout } from "@/lib/auth";
+
+export default function Header() {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  return (
+    <header className="mb-6 flex items-center justify-between rounded-2xl bg-white p-4 shadow">
+      <div>
+        <h1 className="text-xl font-bold text-gray-800">Route & Root</h1>
+        <p className="text-sm text-gray-500">
+          {loading
+            ? "確認中..."
+            : user
+            ? `ログイン中: ${user.displayName ?? user.email}`
+            : "未ログイン"}
+        </p>
+      </div>
+
+      {user ? (
+        <button
+          onClick={logout}
+          className="rounded-xl bg-gray-200 px-4 py-2 font-semibold text-gray-700"
+        >
+          ログアウト
+        </button>
+      ) : (
+        <button
+          onClick={signInWithGoogle}
+          className="rounded-xl bg-orange-500 px-4 py-2 font-semibold text-white"
+        >
+          Googleでログイン
+        </button>
+      )}
+    </header>
+  );
+}
+</file>
+
+<file path="lib/apple.ts">
+// lib/apple.ts
+
+// 1. リンゴの品種（バラエティ）の型定義
+export type AppleVariety = 'sun' | 'moon' | 'midnight' | 'forest' | 'rare';
+
+// 2. リンゴの日本語名マスターデータ
+// 貯蔵庫（Collection）などで表示する際に使用します
+export const APPLE_NAMES: Record<AppleVariety, string> = {
+  sun: "サン・ルビー",
+  moon: "ムーン・シルバー",
+  forest: "フォレスト・ジェイド",
+  midnight: "ミッドナイト",
+  rare: "ゴールデン・ピピン"
+};
+
+// 3. 品種ごとのイメージカラー（UI演出用）
+// 背景を光らせたり、雨の色を変えたりする時に便利です
+export const APPLE_COLORS: Record<AppleVariety, string> = {
+  sun: "#ff4d4d",      // 鮮やかな赤
+  moon: "#e2e8f0",     // シルバーグレー
+  forest: "#10b981",   // エメラルドグリーン
+  midnight: "#4338ca", // 深いネイビー
+  rare: "#fbbf24"      // ゴールド
+};
+
+// 4. (おまけ) 品種ごとの説明文（図鑑風にしたい場合）
+export const APPLE_DESC: Record<AppleVariety, string> = {
+  sun: "情熱的なやる気に満ちた時に実る、太陽の果実。",
+  moon: "静かな落ち着きの中で育つ、神秘的なリンゴ。",
+  forest: "安定した心が生み出す、癒やしの力を持つ果実。",
+  midnight: "深い思索や葛藤の末に実る、夜のリンゴ。",
+  rare: "奇跡的なバランスで生まれる、最高級の黄金リンゴ。"
+};
+</file>
+
+<file path="app/api/generate-apple/route.ts">
+import { GoogleGenAI, Type } from "@google/genai";
+
+// 他のAPI（generate-planなど）と同じ設定を使用
+const ai = new GoogleGenAI({
+  vertexai: true,
+  project: process.env.GOOGLE_CLOUD_PROJECT!,
+  location: "us-central1",
+});
+
+export async function POST(req: Request) {
+  try {
+    const { moodScore, note, image } = await req.json();
+
+    // 1. 品種をスコア(1-5)でガッチリ固定（データの整合性を守る）
+    const varietyMap: Record<number, string> = {
+      1: 'forest',   // 静かな森（低め）
+      2: 'moon',     // 穏やかな月（少し低め）
+      3: 'midnight', // 真夜中の集中（普通）
+      4: 'sun',      // 太陽の情熱（高め）
+      5: 'rare'      // 黄金の果実（最高！）
+    };
+    const fixedVariety = varietyMap[Number(moodScore)] || 'forest';
+
+    // 2. AIへの入力パーツを組み立て
+    const prompt = `あなたは不思議な農園の園主です。
+ユーザーが「今日頑張ったこと」を報告してきました。
+
+【入力情報】
+- やる気Lv: ${moodScore}/5
+- ユーザーのメモ: ${note || "（メモなし）"}
+
+【あなたの仕事】
+1. 画像が送られてきている場合、その内容（本、ノート、プログラム、計算、運動など）を具体的に読み取ってください。
+2. ユーザーの努力を15文字以内で、温かく、かつ具体的に褒めてください。
+例（画像に数式がある場合）：「難しい計算、頑張ったね！」
+例（画像にコードがある場合）：「綺麗なコード、実りの予感だね」
+例（画像がない場合）：「一歩ずつの歩みが、栄養だよ」
+
+※「」や解説は不要です。メッセージのみを返してください。`;
+
+    const contentParts: any[] = [{ text: prompt }];
+
+    // ★ 画像（Base64形式）がある場合、Geminiが理解できる形式に変換して追加
+    if (image && image.includes(",")) {
+      const base64Data = image.split(",")[1]; // "data:image/jpeg;base64,..." のカンマ以降
+      const mimeType = image.split(";")[0].split(":")[1]; // mimeTypeの取得
+
+      contentParts.push({
+        inlineData: {
+          data: base64Data,
+          mimeType: mimeType || "image/jpeg",
+        },
+      });
+    }
+
+    // 3. Geminiを呼び出し（Vision機能を使用）
+    const response = await ai.models.generateContent({
+      model: "gemini-1.5-flash", // 画像解析が得意で高速なモデル
+      contents: [{ role: "user", parts: contentParts }],
+    });
+
+    const aiMessage = response.text?.trim() || "一歩ずつ進みましょう。";
+
+    // 4. フロントエンドが期待する形式で返却
+    return Response.json({
+      variety: fixedVariety,
+      message: aiMessage
+    });
+
+  } catch (error) {
+    console.error("Gemini Multi-modal Error:", error);
+    return Response.json({ 
+      variety: "forest", 
+      message: "木が静かに成長を見守っています。" 
+    });
+  }
+}
+</file>
+
+<file path="types/log.ts">
+export type LogDoc = {
+  userId: string;
+  routeId: string;
+  routeName: string;
+  moodScore: number;
+  note: string;
+  appleColor: string;
+  appleSize: number;
+  comment: string;
+  createdAt: string;
+  variety: 'sun' | 'moon' | 'midnight' | 'forest' | 'rare'; // ★これを追加
+};
+</file>
+
+<file path="app/collection/[userId]/page.tsx">
+"use client";
+import { useEffect, useState, useMemo } from "react";
+import { useParams, useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { getUserLogs, deleteUserLog } from "@/lib/firestore";
+import { AppleVariety, APPLE_NAMES, APPLE_COLORS } from "@/lib/apple";
+
+type AppleLog = {
+  id: string;
+  variety: AppleVariety;
+  note: string;
+  moodScore: number;
+  createdAt: string;
+  routeId: string; 
+  routeName?: string;
+  comment?: string;
+};
+
+// まとめた後のデータ型
+type AppleGroup = {
+  variety: AppleVariety;
+  count: number;
+  color: string;
+  ids: string[]; // 削除用にIDを溜めておく
+  memos: {
+    id: string;
+    text: string;
+    comment?: string;
+    date: string;
+  }[];
+};
+
+export default function CollectionPage() {
+  const params = useParams();
+  const userId = params?.userId as string; 
+  const searchParams = useSearchParams();
+  const fromRouteId = searchParams.get("from") || "test";
+
+  const [apples, setApples] = useState<AppleLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedVarietyKeys, setSelectedVarietyKeys] = useState<string[]>([]); // "目標名-品種" で選択管理
+
+  useEffect(() => {
+    if (!userId) return;
+    async function loadApples() {
+      try {
+        const data = await getUserLogs(userId);
+        setApples(data as AppleLog[]);
+      } catch (error) {
+        console.error("❌ 取得エラー:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadApples();
+  }, [userId]);
+
+  // ★ 目標 ＞ 品種 ごとにがっちゃんこするロジック
+  const groupedData = useMemo(() => {
+    const groups: Record<string, Record<string, AppleGroup>> = {};
+
+    apples.forEach((apple) => {
+      const rName = apple.routeName || "その他の目標";
+      const v = apple.variety;
+
+      if (!groups[rName]) groups[rName] = {};
+
+      if (!groups[rName][v]) {
+        groups[rName][v] = {
+          variety: v,
+          count: 0,
+          color: APPLE_COLORS[v] || "#10b981",
+          ids: [],
+          memos: []
+        };
+      }
+
+      groups[rName][v].count += 1;
+      groups[rName][v].ids.push(apple.id);
+      groups[rName][v].memos.push({
+        id: apple.id,
+        text: apple.note || "（メモなし）",
+        comment: apple.comment,
+        date: new Date(apple.createdAt).toLocaleDateString()
+      });
+    });
+
+    return groups;
+  }, [apples]);
+
+  const toggleSelect = (routeName: string, variety: string) => {
+    const key = `${routeName}-${variety}`;
+    setSelectedVarietyKeys(prev => 
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  const handleDelete = async () => {
+    const allSelectedIds = selectedVarietyKeys.flatMap(key => {
+      const [rName, v] = key.split("-");
+      return groupedData[rName][v].ids;
+    });
+
+    if (allSelectedIds.length === 0) return;
+    if (!confirm(`${allSelectedIds.length}個のリンゴを土に還しますか？`)) return;
+
+    try {
+      setLoading(true);
+      await Promise.all(allSelectedIds.map(id => deleteUserLog(id)));
+      setApples(prev => prev.filter(a => !allSelectedIds.includes(a.id)));
+      setSelectedVarietyKeys([]);
+      setIsSelectMode(false);
+    } catch (e) {
+      alert("削除に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-orange-50 p-6 pb-32">
+      <header className="max-w-4xl mx-auto mb-10 flex justify-between items-end">
+        <div>
+          <h1 className="text-4xl font-black text-orange-900 mb-2">リンゴ貯蔵庫</h1>
+          <button 
+            onClick={() => { setIsSelectMode(!isSelectMode); setSelectedVarietyKeys([]); }}
+            className="text-[10px] font-black bg-white px-3 py-1 rounded-full shadow-sm text-orange-600 border border-orange-100 hover:bg-orange-50"
+          >
+            {isSelectMode ? "キャンセル" : "整理する"}
+          </button>
+        </div>
+        <div className="bg-white px-6 py-2 rounded-2xl shadow-sm border-2 border-orange-100">
+          <span className="text-sm font-bold text-slate-400">Total</span>
+          <span className="ml-2 text-2xl font-black text-orange-500">{apples.length}</span>
+        </div>
+      </header>
+
+      {loading ? (
+        <div className="flex justify-center py-20"><div className="animate-spin h-10 w-10 border-4 border-orange-500 border-t-transparent rounded-full" /></div>
+      ) : Object.keys(groupedData).length === 0 ? (
+        <div className="text-center py-20 bg-white rounded-[40px] border-4 border-dashed border-orange-100">
+          <p className="text-slate-400 font-bold">まだリンゴがありません。農園で育ててみましょう！</p>
+        </div>
+      ) : (
+        <div className="max-w-4xl mx-auto space-y-16">
+          {Object.entries(groupedData).map(([routeName, varieties]) => (
+            <section key={routeName} className="space-y-6">
+              <h2 className="text-xl font-black text-orange-800 border-l-4 border-orange-500 pl-4">📍 目標: {routeName}</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {Object.entries(varieties).map(([v, data]) => {
+                  const isSelected = selectedVarietyKeys.includes(`${routeName}-${v}`);
+                  return (
+                    <div 
+                      key={v}
+                      onClick={() => isSelectMode && toggleSelect(routeName, v)}
+                      className={`bg-white rounded-[35px] p-6 shadow-xl border-2 transition-all relative overflow-hidden flex flex-col
+                        ${isSelectMode ? 'cursor-pointer' : ''}
+                        ${isSelected ? 'border-red-400 bg-red-50 ring-4 ring-red-100' : 'border-orange-50'}
+                      `}
+                    >
+                      {/* リンゴ情報ヘッダー */}
+                      <div className="flex items-center gap-4 mb-4">
+                        <div className="relative">
+                          <img src={`/images/apple-${data.variety}.svg`} className="w-16 h-16 object-contain drop-shadow-md" />
+                          <span className="absolute -top-2 -right-2 bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-md">
+                            x{data.count}
+                          </span>
+                        </div>
+                        <div>
+                          <h3 className="font-black text-slate-700">{APPLE_NAMES[data.variety] || v}</h3>
+                          <p className="text-[10px] font-black uppercase tracking-widest" style={{ color: data.color }}>Collection</p>
+                        </div>
+                        {isSelectMode && (
+                          <div className={`ml-auto w-6 h-6 rounded-full border-2 flex items-center justify-center ${isSelected ? "bg-red-500 border-red-500 text-white" : "border-slate-200"}`}>
+                            {isSelected && "✓"}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 溜まったメモのリスト */}
+                      <div className="bg-orange-50/50 rounded-2xl p-4 space-y-3 max-h-48 overflow-y-auto custom-scrollbar">
+                        <p className="text-[9px] font-black text-orange-300 uppercase">Growth History</p>
+                        {data.memos.map((memo) => (
+                          <div key={memo.id} className="border-l-2 border-orange-200 pl-3 py-1">
+                            <div className="flex justify-between items-start mb-1">
+                              <p className="text-xs text-slate-700 font-bold leading-tight">{memo.text}</p>
+                              <span className="text-[8px] text-slate-400 shrink-0 ml-2">{memo.date}</span>
+                            </div>
+                            {memo.comment && (
+                              <p className="text-[10px] text-orange-400 font-bold italic leading-tight">「{memo.comment}」</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+
+      {/* 削除実行ボタン */}
+      {isSelectMode && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-bottom-10">
+          <button onClick={handleDelete} disabled={selectedVarietyKeys.length === 0} className="bg-red-500 text-white px-8 py-4 rounded-full font-black shadow-2xl disabled:opacity-50 active:scale-95 transition-all">
+            選択した品種をまとめて土に還す 🔥
+          </button>
+        </div>
+      )}
+
+      {/* ナビゲーション */}
+      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
+        <Link href={`/garden/${fromRouteId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
+          <span className="text-2xl">🌳</span><span className="text-[10px] font-black text-slate-400">農園</span>
+        </Link>
+        <Link href={`/map/${fromRouteId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
+          <span className="text-2xl">🗺️</span><span className="text-[10px] font-black text-slate-400">マップ</span>
+        </Link>
+        <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center shadow-lg"><span className="text-2xl text-white">📦</span></div>
+        <Link href="/history" className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">
+          <span className="text-2xl">📜</span><span className="text-[10px] font-black text-slate-400">履歴</span>
+        </Link>
+      </footer>
+    </div>
+  );
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "route-and-root",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@google-cloud/vertexai": "^1.10.0",
+    "@google/genai": "^1.45.0",
+    "@google/generative-ai": "^0.24.1",
+    "firebase": "^12.10.0",
+    "next": "16.1.6",
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.1.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
+</file>
+
+<file path="app/api/save-log/route.ts">
+import { saveLog } from "@/lib/firestore";
+import { APPLE_COLORS, AppleVariety } from "@/lib/apple";
+import { LogDoc } from "@/types/log";
+
+export async function POST(req: Request) {
+  try {
+    const { userId, routeId,routeName, moodScore, note, variety, comment ,createdAt} = await req.json();
+
+    if (!userId || !routeId || !moodScore) {
+      return Response.json(
+        { error: "userId, routeId, moodScore は必須です" },
+        { status: 400 }
+      );
+    }
+
+
+    const log: LogDoc = {
+      userId,
+      routeId,
+      moodScore: Number(moodScore),
+      note: note ?? "",
+      variety: variety || "forest",
+      routeName: routeName || "不明な旅路",
+      appleColor: APPLE_COLORS[variety as AppleVariety] || "#10b981",
+      appleSize: 100, // サイズは固定にするか、型定義から消してもOK
+      comment: comment || "",
+      createdAt: new Date().toISOString(),
+    };
+
+    const logId = await saveLog(log);
+
+    return Response.json({
+      success: true,
+      logId,
+      variety: log.variety,
+      color: log.appleColor
+    });
+  } catch (error) {
+    console.error(error);
+    return Response.json(
+      { error: "感情ログの保存に失敗しました" },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="components/MissionMap.tsx">
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { exportToGoogleTasks } from "@/lib/googleTasks";
+import { getGoogleTasksAccessToken } from "@/lib/auth";
+
+type Step = {
+  id: string;
+  title: string;
+  description: string;
+  scheduledDay: number;
+  done: boolean;
+};
+
+type Phase = {
+  title: string;
+  startDay: number;
+  endDay: number;
+  description: string;
+};
+
+type Props = {
+  routeId: string;
+  goal: string;
+  summary: string;
+  progress: number;
+  steps: Step[];
+  phases?: Phase[];
+};
+
+const [openPhases, setOpenPhases] = useState<Set<number>>(
+  // 初期状態：現在進行中のフェーズだけ開く
+  () => {
+    if (!phases || phases.length === 0) return new Set([0]);
+    const completedDays = sortedAsc
+      .filter(s => s.done)
+      .map(s => s.scheduledDay);
+    const maxCompletedDay = completedDays.length > 0 ? Math.max(...completedDays) : 0;
+    const currentPhaseIndex = phases.findIndex(
+      p => maxCompletedDay >= p.startDay && maxCompletedDay <= p.endDay
+    );
+    return new Set([Math.max(0, currentPhaseIndex)]);
+  }
+);
+
+const togglePhase = (index: number) => {
+  setOpenPhases(prev => {
+    const next = new Set(prev);
+    if (next.has(index)) { next.delete(index); } else { next.add(index); }
+    return next;
+  });
+};
+
+function StepCard({
+  step,
+  index,
+  total,
+  unlocked,
+  loading,
+  editingStepId,
+  editTitle,
+  editDescription,
+  onToggle,
+  onEditStart,
+  onEditSave,
+  onEditCancel,
+  onEditTitleChange,
+  onEditDescriptionChange,
+}: {
+  step: Step;
+  index: number;
+  total: number;
+  unlocked: boolean;
+  loading: boolean;
+  editingStepId: string | null;
+  editTitle: string;
+  editDescription: string;
+  onToggle: () => void;
+  onEditStart: () => void;
+  onEditSave: () => void;
+  onEditCancel: () => void;
+  onEditTitleChange: (v: string) => void;
+  onEditDescriptionChange: (v: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setVisible(entry.isIntersecting),
+      { threshold: 0.1 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const isEditing = editingStepId === step.id;
+  const isLeft = index % 2 === 0;
+  const depthScale = 1 - (total - 1 - index) * 0.04;
+
+  return (
+    <div
+      ref={ref}
+      className="relative flex items-center py-5"
+      style={{
+        opacity: visible ? (unlocked ? 1 : 0.4) : 0,
+        transform: visible
+          ? `scaleX(${depthScale}) translateY(0)`
+          : `scaleX(${depthScale}) translateY(28px)`,
+        transformOrigin: "center center",
+        transition: "opacity 0.4s ease, transform 0.4s ease",
+      }}
+    >
+      {/* 中央ノード */}
+      <div className="absolute left-1/2 z-10 -translate-x-1/2">
+        <div
+          className="flex h-7 w-7 items-center justify-center rounded-full"
+          style={{ backgroundColor: "#e0f2fe" }}
+        >
+          <div
+            className={`h-4 w-4 rounded-full border-2 transition-all duration-300 ${
+              step.done
+                ? "border-sky-500 bg-sky-400 shadow-[0_0_12px_rgba(56,189,248,0.7)]"
+                : unlocked
+                ? "border-sky-300 bg-white"
+                : "border-sky-200 bg-sky-100"
+            }`}
+          />
+        </div>
+      </div>
+
+      {/* カード */}
+      <div className={`w-[44%] ${isLeft ? "mr-auto pl-1" : "ml-auto pr-1"}`}>
+        <div
+          className={`rounded-2xl border p-4 transition-all duration-300 ${
+            step.done
+              ? "border-sky-300 bg-sky-100/80 shadow-md"
+              : unlocked
+              ? "border-sky-200 bg-white shadow-lg"
+              : "border-sky-100 bg-sky-50/60"
+          }`}
+        >
+          {!unlocked && (
+            <p className="mb-1 text-xs text-sky-300">🔒 前を完了してください</p>
+          )}
+          <p className={`mb-1 text-xs font-bold ${
+            step.done ? "text-sky-500" : unlocked ? "text-sky-400" : "text-sky-300"
+          }`}>
+            Day {step.scheduledDay}
+          </p>
+
+          {isEditing ? (
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={editTitle}
+                onChange={(e) => onEditTitleChange(e.target.value)}
+                className="w-full rounded-lg border border-sky-300 bg-sky-50 p-2 text-sm font-bold text-sky-900 focus:outline-none"
+              />
+              <textarea
+                value={editDescription}
+                onChange={(e) => onEditDescriptionChange(e.target.value)}
+                className="w-full rounded-lg border border-sky-200 bg-sky-50 p-2 text-xs text-sky-700 focus:outline-none"
+                rows={2}
+              />
+              <div className="flex gap-2">
+                <button onClick={onEditSave} className="rounded-lg bg-sky-500 px-3 py-1 text-xs font-bold text-white">保存</button>
+                <button onClick={onEditCancel} className="rounded-lg bg-sky-100 px-3 py-1 text-xs text-sky-600">キャンセル</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h3 className={`text-sm font-black leading-snug ${
+                  step.done ? "text-sky-400 line-through" : "text-sky-900"
+                }`}>
+                {step.title}
+              </h3>
+              <p className={`mt-1 text-xs leading-relaxed ${
+                step.done ? "text-sky-400" : unlocked ? "text-sky-600" : "text-sky-300"
+              }`}>
+                {step.description}
+              </p>
+              <div className="mt-3 flex items-center justify-between">
+                <label className={`flex cursor-pointer items-center gap-2 ${!unlocked ? "cursor-not-allowed" : ""}`}>
+                  <input
+                    type="checkbox"
+                    checked={step.done}
+                    disabled={loading || !unlocked}
+                    onChange={onToggle}
+                    className="h-4 w-4 accent-sky-500"
+                  />
+                  <span className="text-xs text-sky-400">
+                    {step.done ? "完了！" : "完了にする"}
+                  </span>
+                </label>
+                {unlocked && !step.done && (
+                  <button onClick={onEditStart} className="text-xs text-sky-300 underline hover:text-sky-500">
+                    編集
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function MissionMap({ routeId, goal, summary, progress, steps }: Props) {
+  const [localSteps, setLocalSteps] = useState(steps);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [editingStepId, setEditingStepId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const headerRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [headerH, setHeaderH] = useState(160);
+  const [footerH, setFooterH] = useState(180);
+  const router = useRouter();
+
+  // ヘッダー・フッターの高さを実測
+  useEffect(() => {
+  const el = scrollRef.current;
+  if (!el) return;
+  // 描画完了後に一番下へ
+  const timer = setTimeout(() => {
+    el.scrollTop = el.scrollHeight;
+  }, 100);
+  return () => clearTimeout(timer);
+}, []);
+
+  const sortedAsc = [...localSteps].sort((a, b) => a.scheduledDay - b.scheduledDay);
+  const sortedSteps = [...sortedAsc].reverse();
+
+  const currentProgress =
+    localSteps.length === 0
+      ? 0
+      : Math.round((localSteps.filter((s) => s.done).length / localSteps.length) * 100);
+
+  const isUnlocked = (stepId: string) => {
+    const idx = sortedAsc.findIndex((s) => s.id === stepId);
+    if (idx === 0) return true;
+    return sortedAsc[idx - 1].done;
+  };
+
+  const handleToggle = async (stepId: string) => {
+    if (!isUnlocked(stepId)) return;
+    const updated = localSteps.map((s) =>
+      s.id === stepId ? { ...s, done: !s.done } : s
+    );
+    setLocalSteps(updated);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/update-steps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ routeId, steps: updated }),
+      });
+      if (!res.ok) throw new Error("更新失敗");
+      router.refresh();
+    } catch (e) {
+      console.error(e);
+      alert("更新に失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleEditStart = (step: Step) => {
+    setEditingStepId(step.id);
+    setEditTitle(step.title);
+    setEditDescription(step.description);
+  };
+
+  const handleEditSave = async (stepId: string) => {
+    const updated = localSteps.map((s) =>
+      s.id === stepId ? { ...s, title: editTitle, description: editDescription } : s
+    );
+    setLocalSteps(updated);
+    setEditingStepId(null);
+    try {
+      await fetch("/api/update-steps", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ routeId, steps: updated }),
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const token = await getGoogleTasksAccessToken();
+      if (!token) throw new Error("トークンを取得できませんでした");
+      await exportToGoogleTasks(token, goal, localSteps);
+      alert(`「Route & Root: ${goal}」を Google Tasks に書き出しました`);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "書き出しに失敗しました");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  return (
+    <div
+      className="relative h-screen overflow-hidden text-sky-900"
+      style={{ background: "linear-gradient(180deg, #e0f2fe 0%, #f0f9ff 50%, #ffffff 100%)" }}
+    >
+
+      {/* ══════════════════════════════════
+          層1: GOALヘッダー（最前面・fixed）
+      ══════════════════════════════════ */}
+      <div
+        ref={headerRef}
+        className="fixed left-0 right-0 top-0 z-30 pb-4 pt-6 text-center"
+        style={{ backgroundColor: "#e0f2fe" }}
+      >
+        <div className="mx-auto max-w-sm px-4">
+          <div className="mb-1 inline-block rounded-full bg-sky-200/70 px-4 py-1 text-xs font-bold uppercase tracking-widest text-sky-600">
+            ✦ Goal ✦
+          </div>
+          <h1 className="text-lg font-black text-sky-900">{goal}</h1>
+          <p className="mt-1 text-xs text-sky-500">{summary}</p>
+          <div className="mx-auto mt-3 max-w-xs">
+            <div className="mb-1 flex justify-between text-xs text-sky-400">
+              <span>進捗</span>
+              <span className="font-bold text-sky-600">{currentProgress}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-sky-200">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-sky-400 to-blue-400 transition-all duration-700"
+                style={{ width: `${currentProgress}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* GOALヘッダー直下のフェードアウト層 */}
+        <div
+          className="pointer-events-none absolute bottom-0 left-0 right-0 translate-y-full"
+          style={{
+            height: "48px",
+            background: "linear-gradient(to bottom, #e0f2fe, transparent)",
+          }}
+        />
+      </div>
+
+      {/* ══════════════════════════════════
+          層2: ボタン群（fixed・下部）
+      ══════════════════════════════════ */}
+      <div
+        ref={footerRef}
+        className="fixed bottom-0 left-0 right-0 z-30 px-4 pb-6 pt-4"
+        style={{ background: "linear-gradient(to top, #ffffff 60%, transparent)" }}
+      >
+        <div className="mx-auto flex max-w-sm flex-col gap-3">
+          <button
+            onClick={handleExport}
+            disabled={exporting}
+            className="w-full rounded-xl bg-blue-500 py-3 font-bold text-white transition hover:bg-blue-600 disabled:opacity-50"
+          >
+            {exporting ? "書き出し中..." : "Google Tasks に書き出す"}
+          </button>
+          <Link
+            href={`/garden/${routeId}`}
+            className="w-full rounded-xl bg-emerald-500 py-3 text-center font-bold text-white transition hover:bg-emerald-600"
+          >
+            果樹園（Garden）へ向かう 🍎
+          </Link>
+          <Link
+            href="/history"
+            className="w-full rounded-xl bg-sky-100 py-3 text-center font-bold text-sky-600 transition hover:bg-sky-200"
+          >
+            📜 旅の記録を見る
+          </Link>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════
+          層3: タスクリスト（スクロール領域）
+          ヘッダーとフッターの高さ分だけpaddingを確保
+      ══════════════════════════════════ */}
+      <div
+        ref={scrollRef}
+        className="absolute inset-0 overflow-y-auto"
+        style={{
+          paddingTop: `${headerH + 48}px`,
+          paddingBottom: `${footerH}px`,
+          zIndex: 10,
+        }}
+      >
+        <div className="relative mx-auto max-w-lg px-4">
+          {/* 中央縦ライン */}
+          <div
+            className="pointer-events-none absolute left-1/2 w-px -translate-x-1/2"
+            style={{
+              top: 0,
+              bottom: 0,
+              background: "linear-gradient(to bottom, rgba(125,211,252,0.1), rgba(125,211,252,0.5) 20%, rgba(125,211,252,0.5) 80%, rgba(125,211,252,0.1))",
+            }}
+          />
+
+          <div className="flex flex-col">
+  {phases && phases.length > 0 ? (
+    // フェーズあり：アコーディオン表示
+    phases.map((phase, phaseIndex) => {
+      const phaseSteps = sortedSteps.filter(
+        s => s.scheduledDay >= phase.startDay && s.scheduledDay <= phase.endDay
+      );
+      const phaseDone = phaseSteps.filter(s => s.done).length;
+      const phaseTotal = phaseSteps.length;
+      const phaseProgress = phaseTotal === 0 ? 0 : Math.round((phaseDone / phaseTotal) * 100);
+      const isOpen = openPhases.has(phaseIndex);
+      const isCompleted = phaseProgress === 100;
+
+      return (
+        <div key={phaseIndex} className="mb-4">
+          {/* フェーズヘッダー */}
+          <button
+            onClick={() => togglePhase(phaseIndex)}
+            className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-sky-100/80 border border-sky-200 text-left transition hover:bg-sky-200/60"
+          >
+            <div className="flex items-center gap-3">
+              <span className="text-lg">
+                {isCompleted ? "✅" : isOpen ? "📖" : "📕"}
+              </span>
+              <div>
+                <p className="text-sm font-black text-sky-900">{phase.title}</p>
+                <p className="text-xs text-sky-500">
+                  Day {phase.startDay} 〜 {phase.endDay}　{phaseDone}/{phaseTotal} 完了
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* フェーズ進捗バー */}
+              <div className="w-16 h-1.5 rounded-full bg-sky-200 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-sky-500 transition-all"
+                  style={{ width: `${phaseProgress}%` }}
+                />
+              </div>
+              <span className="text-sky-400 text-xs">
+                {isOpen ? "▲" : "▼"}
+              </span>
+            </div>
+          </button>
+
+          {/* フェーズ内ステップ */}
+          {isOpen && (
+            <div className="mt-2">
+              {phaseSteps.map((step, index) => {
+                const globalIndex = sortedSteps.findIndex(s => s.id === step.id);
+                return (
+                  <StepCard
+                    key={step.id}
+                    step={step}
+                    index={globalIndex}
+                    total={sortedSteps.length}
+                    unlocked={isUnlocked(step.id)}
+                    loading={loading}
+                    editingStepId={editingStepId}
+                    editTitle={editTitle}
+                    editDescription={editDescription}
+                    onToggle={() => handleToggle(step.id)}
+                    onEditStart={() => handleEditStart(step)}
+                    onEditSave={() => handleEditSave(step.id)}
+                    onEditCancel={() => setEditingStepId(null)}
+                    onEditTitleChange={setEditTitle}
+                    onEditDescriptionChange={setEditDescription}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    })
+  ) : (
+    // フェーズなし（既存ルート）：従来の表示
+    sortedSteps.map((step, index) => (
+      <StepCard
+        key={step.id}
+        step={step}
+        index={index}
+        total={sortedSteps.length}
+        unlocked={isUnlocked(step.id)}
+        loading={loading}
+        editingStepId={editingStepId}
+        editTitle={editTitle}
+        editDescription={editDescription}
+        onToggle={() => handleToggle(step.id)}
+        onEditStart={() => handleEditStart(step)}
+        onEditSave={() => handleEditSave(step.id)}
+        onEditCancel={() => setEditingStepId(null)}
+        onEditTitleChange={setEditTitle}
+        onEditDescriptionChange={setEditDescription}
+      />
+    ))
+  )}
+</div>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+</file>
+
+<file path="README.md">
+<<<<<<< HEAD
+This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+
+## Getting Started
+
+First, run the development server:
+
+```bash
+npm run dev
+# or
+yarn dev
+# or
+pnpm dev
+# or
+bun dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+
+This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Learn More
+
+To learn more about Next.js, take a look at the following resources:
+
+- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
+- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+
+You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+
+## Deploy on Vercel
+
+The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+
+Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+=======
+# hakanso
+
+# Route & Root
+
+Route & Root は、目標達成までのプロセスを「旅」として捉え、  
+日々の感情を「リンゴ」として育てるタスク管理アプリです。
+
+ユーザーが目標を入力すると、AI が達成までの道のりを「旅のしおり」として生成します。  
+さらに、その日の気分や一言メモを記録することで、自分だけのリンゴが変化していきます。
+
+進捗だけでなく、葛藤や疲れも含めて「成長の記録」として残すことを目指しています。
+
+---
+
+## コンセプト
+
+従来のタスク管理アプリは、完了や進捗に注目しがちです。  
+Route & Root では、そこに感情の記録を加えます。
+
+- **Route** = 目標達成までの道のり
+- **Root** = その過程で育つ感情と成長の記録
+
+うまくいかなかった日や気分が落ち込んだ日も、  
+失敗ではなく「育ち方の違い」として可視化します。
+
+---
+
+## MVPで実装する機能
+
+- 目標入力フォーム
+- AIによるミッションプラン生成
+- ミッションマップ表示
+- 気分ログ入力
+- 気分に応じたリンゴの変化
+- Firebase Authentication によるログイン
+- Firestore へのデータ保存
+
+---
+
+## 画面構成
+
+### 1. 目標入力画面
+ユーザーが以下を入力します。
+
+- 目標
+- 何日で達成したいか
+- 自分への一言メッセージ
+
+送信すると、Gemini API を使ってプランを生成します。
+
+### 2. ミッションマップ画面
+AI が生成したステップ一覧を表示します。
+
+- タスクの分解表示
+- 各ステップの確認
+- 完了チェック
+- 進捗確認
+
+### 3. 果樹園画面
+ユーザーが以下を入力します。
+
+- 気分スコア（1〜5）
+- 一言メモ
+
+その内容に応じて、リンゴの
+
+- 色
+- 大きさ
+
+が変化します。
+
+---
+
+## 使用技術
+
+- **言語:** TypeScript
+- **フレームワーク:** Next.js（App Router）
+- **UI:** React + Tailwind CSS
+- **AI:** Gemini API
+- **認証:** Firebase Authentication
+- **データベース:** Firestore
+- **デプロイ:** Vercel
+
+---
+
+## ディレクトリ構成
+
+```txt
+route-and-root/
+├─ app/
+│  ├─ page.tsx
+│  ├─ map/
+│  │  └─ [routeId]/
+│  │     └─ page.tsx
+│  ├─ garden/
+│  │  └─ [routeId]/
+│  │     └─ page.tsx
+│  ├─ api/
+│  │  ├─ generate-plan/
+│  │  │  └─ route.ts
+│  │  ├─ save-route/
+│  │  │  └─ route.ts
+│  │  ├─ get-route/
+│  │  │  └─ route.ts
+│  │  └─ save-log/
+│  │     └─ route.ts
+│  ├─ layout.tsx
+│  └─ globals.css
+│
+├─ components/
+│  ├─ GoalForm.tsx
+│  ├─ MissionMap.tsx
+│  ├─ Apple.tsx
+│  ├─ MoodForm.tsx
+│  └─ Header.tsx
+│
+├─ lib/
+│  ├─ firebase.ts
+│  ├─ firestore.ts
+│  ├─ gemini.ts
+│  └─ apple.ts
+│
+├─ types/
+│  ├─ route.ts
+│  ├─ log.ts
+│  └─ user.ts
+│
+├─ .env.local
+├─ package.json
+└─ README.md
+````
+
+---
+
+## データ構造
+
+### users/{uid}
+
+ユーザー情報を保存します。
+
+### routes/{routeId}
+
+以下の情報を保存します。
+
+* goal
+* durationDays
+* message
+* summary
+* steps
+* progress
+* userId
+
+### logs/{logId}
+
+以下の情報を保存します。
+
+* routeId
+* userId
+* moodScore
+* note
+* appleColor
+* appleSize
+* comment
+
+---
+
+## AIが返すJSON形式
+
+AI は以下のような形式でプランを返します。
+
+```json
+{
+  "goal": "統計のテストに合格する",
+  "summary": "7日間で復習と演習を進める学習ルート",
+  "steps": [
+    {
+      "title": "確率の基本を復習する",
+      "description": "定義と代表的な公式を確認する",
+      "scheduledDay": 1
+    },
+    {
+      "title": "過去問を3問解く",
+      "description": "基礎問題を中心に解いて流れを確認する",
+      "scheduledDay": 2
+    }
+  ]
+}
+```
+
+---
+
+## リンゴ変化ルール
+
+| moodScore | color   | size |
+| --------- | ------- | ---- |
+| 1         | #888888 | 60   |
+| 2         | #6fa8dc | 75   |
+| 3         | #ffaa00 | 90   |
+| 4         | #ff7043 | 105  |
+| 5         | #ff3333 | 120  |
+
+---
+
+## セットアップ方法
+
+### 1. リポジトリをクローン
+
+```bash
+git clone <リポジトリURL>
+cd route-and-root
+```
+
+### 2. パッケージをインストール
+
+```bash
+npm install
+```
+
+### 3. `.env.local` を作成
+
+以下の環境変数を設定してください。
+
+```env
+GEMINI_API_KEY=your_gemini_api_key
+
+NEXT_PUBLIC_FIREBASE_API_KEY=your_firebase_api_key
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_firebase_auth_domain
+NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_storage_bucket
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+```
+
+### 4. 開発サーバーを起動
+
+```bash
+npm run dev
+```
+
+ブラウザで `http://localhost:3000` を開いてください。
+
+---
+
+## 役割分担
+
+### ロジック / API / データベース担当
+
+* Gemini API 連携
+* API route 実装
+* Firebase Authentication
+* Firestore 接続
+* 型定義
+* 気分からリンゴパラメータへの変換ロジック
+
+### UI / デザイン担当
+
+* 入力フォームUI
+* ミッションマップUI
+* Appleコンポーネント
+* 果樹園画面の見た目
+* Tailwind によるデザイン調整
+
+---
+
+## 今回の開発目標
+
+このプロジェクトは、万能な人生管理アプリを作ることが目的ではありません。
+
+MVPで目指すのは、次の体験を完成させることです。
+
+> 目標を入力すると、AIが旅のしおりを作ってくれる。
+> 気分を記録すると、リンゴが育つ。
+
+この一本の体験を、きちんと動く形で完成させます。
+
+---
+
+## 今回は実装しないもの
+
+以下はMVPの対象外です。
+
+* Google Calendar 連携
+* Google Tasks 連携
+* 音声入力
+* 画像入力
+* ソーシャル共有
+* RAGによる推薦
+* 過去の自分 / 未来の自分キャラクター機能
+
+---
+
+## デモの流れ
+
+1. ログインする
+2. 目標を入力する
+3. AIでプランを生成する
+4. ミッションマップを見る
+5. 果樹園へ移動する
+6. 気分とメモを入力する
+7. リンゴが変化する
+
+---
+
+## メンバー
+
+* ほし
+* ゆいのみず
+
+---
+
+## ライセンス
+>>>>>>> b89f4b251892c53cbd23d012b5b8f74fb36efeef
+</file>
+
+<file path="app/api/generate-plan/route.ts">
+import { GoogleGenAI, Type } from "@google/genai";
+
+const ai = new GoogleGenAI({
+  vertexai: true,
+  project: process.env.GOOGLE_CLOUD_PROJECT!,
+  location: "us-central1",
+});
+
+const stepSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title:        { type: Type.STRING, description: "15文字以内" },
+    description:  { type: Type.STRING, description: "40文字以内" },
+    scheduledDay: { type: Type.INTEGER },
+  },
+  required: ["title", "description", "scheduledDay"],
+};
+
+const phaseSchema = {
+  type: Type.OBJECT,
+  properties: {
+    title:          { type: Type.STRING, description: "フェーズ名（例：基礎固め）" },
+    startDay:       { type: Type.INTEGER },
+    endDay:         { type: Type.INTEGER },
+    description:    { type: Type.STRING, description: "このフェーズの目標を1文で" },
+  },
+  required: ["title", "startDay", "endDay", "description"],
+};
+
+const planSchema = {
+  type: Type.OBJECT,
+  properties: {
+    style:           { type: Type.STRING },
+    styleLabel:      { type: Type.STRING },
+    styleEmoji:      { type: Type.STRING },
+    philosophy:      { type: Type.STRING },
+    tagline:         { type: Type.STRING },
+    suitableFor:     { type: Type.STRING },
+    tradeoff:        { type: Type.STRING },
+    intensityLevel:  { type: Type.INTEGER },
+    recommendedDays: { type: Type.INTEGER },
+    daysComment:     { type: Type.STRING },
+    goal:            { type: Type.STRING },
+    summary:         { type: Type.STRING },
+    steps:           { type: Type.ARRAY, items: stepSchema },
+  },
+  required: [
+    "style", "styleLabel", "styleEmoji",
+    "philosophy", "tagline", "suitableFor", "tradeoff",
+    "intensityLevel", "recommendedDays", "daysComment",
+    "goal", "summary", "steps",
+  ],
+};
+
+export async function POST(req: Request) {
+  try {
+    const { goal, durationDays, message, userHistory } = await req.json();
+
+    if (!goal || !durationDays) {
+      return Response.json(
+        { error: "goal と durationDays は必須です" },
+        { status: 400 }
+      );
+    }
+
+    // ── Step1: Google検索で最新情報を収集 ──
+    let searchContext = "";
+    try {
+      const searchResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: `以下の目標を達成するための、現在最も効果的・最新の学習方法、ツール、リソースをGoogle検索で調べてください。
+
+目標: ${goal}
+
+以下の観点で調べてください：
+- 最新バージョンや最新トレンド（2024〜2025年）
+- 現在最も推奨されているツールやサービス名（具体的に）
+- 効率的な学習順序や方法論
+- 初心者〜中級者向けの具体的なリソース名やサイト名
+
+検索結果をもとに、重要な情報を箇条書きで300文字以内で日本語でまとめてください。`,
+        config: {
+          tools: [{ googleSearch: {} }],
+        },
+      });
+      searchContext = searchResponse.text ?? "";
+    } catch (e) {
+      console.warn("Search grounding skipped:", e);
+    }
+
+    // ── Step2: 3プラン生成 + おすすめ選定 ──
+    const prompt = `
+あなたは目標達成を支援する、ユーザーの専任コーチです。
+以下の情報をもとに、3つのプランを作成し、その中からユーザーに最適な1つを推薦してください。
+
+目標: ${goal}
+ユーザー希望期間(日): ${durationDays}
+ユーザーのメッセージ: ${message || "なし"}
+
+【ユーザーの過去の実績】
+${userHistory || "過去の旅の記録なし（初回ユーザー）"}
+
+${searchContext ? `【Google検索で得た最新情報 - ステップに反映すること】
+${searchContext}
+` : ""}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+【プラン1】style: "full_throttle"
+styleLabel: "Full Throttle" / styleEmoji: "⚡"
+philosophy: 速度と密度で圧倒する。今すぐ結果を出す。
+tagline: 最速で、限界の向こう側へ。
+- 希望期間を上限として最短日数を設定（最短は3分の1まで）
+- ステップ3〜4個・高密度
+- intensityLevel: 5
+- 禁止ワード：「無理せず」「少しずつ」「ゆっくり」
+
+【プラン2】style: "wayfinder"
+styleLabel: "Wayfinder" / styleEmoji: "🧭"
+philosophy: 納得と理解を積み重ねる。自分の地図を自分で描く。
+tagline: 正解より納得を。本物の力をつける旅。
+- 希望期間（${durationDays}日）そのまま使用
+- ステップ5〜7個・各ステップに理由を含める
+- intensityLevel: 3
+- 禁止ワード：「効率」「最短」「ショートカット」
+
+【プラン3】style: "flow_state"
+styleLabel: "Flow State" / styleEmoji: "🌊"
+philosophy: 毎日15分でも続く習慣に変換する。AIと道具を賢く使い、消耗しない。
+tagline: 頑張らずに、仕組みで進む。
+- 希望期間の最大1.5倍まで延長可
+- 1日15〜30分の最小単位に分解
+- 具体的なツール名を2つ以上含める
+- intensityLevel: 2
+- 禁止ワード：「集中して」「まとめて」「一気に」
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+【おすすめの選定】
+上記3つのプランを作成した後、以下の観点でユーザーに最適な1つを選んでください：
+
+判断基準（優先度順）：
+1. ユーザーの過去の完遂率（低ければ負荷の軽いプランを推薦）
+2. ユーザーのメッセージのトーン（忙しそうならflow_state、やる気満々ならfull_throttle）
+3. 目標の性質（知識習得ならwayfinder、スキル習得ならfull_throttle）
+4. 初回ユーザーの場合はwayfinderを推薦
+
+recommendedStyle: "full_throttle" / "wayfinder" / "flow_state" のいずれか
+recommendationMessage: 推薦理由を「ユーザーの状況に寄り添った」温かい口調で2〜3文で。
+  過去データがある場合は必ずそれに言及すること。
+  例：「以前のFull Throttleでは3日目で失速されていましたね。今回はFlow Stateで
+  毎日小さく積み上げる方が、きっと最後まで走り切れると思います。」
+
+━━━━━━━━━━━━━━━━━━━━━━━━━
+出力ルール（厳守）:
+- 3つのプランは明確に性格が違うこと
+- 日本語で出力
+- JSONのみを出力すること
+
+【文字数制限 - これを最優先で守ること】
+- philosophy: 20文字以内
+- tagline: 20文字以内
+- suitableFor: 30文字以内
+- tradeoff: 30文字以内
+- daysComment: 25文字以内
+- summary: 40文字以内
+- recommendationMessage: 60文字以内
+- steps.title: 15文字以内
+- steps.description: 40文字以内
+
+長い文章は必ず削れ。無駄な情報を削ぎ落とすことがこのプランナーの美学である。
+【フェーズ分割ルール】
+- 期間が14日以下：phases は1つ（全体を1フェーズ）
+- 期間が15〜60日：phases は2〜3つ
+- 期間が61日以上：phases は3〜5つ
+- 各フェーズにタイトルをつけること（例：「第1章：基礎固め」「第2章：実践編」）
+- フェーズのstartDayとendDayはstepsのscheduledDayと整合させること
+`
+;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            plans: { type: Type.ARRAY, items: planSchema },
+            recommendedStyle: { type: Type.STRING },
+            recommendationMessage: { type: Type.STRING },
+          },
+          required: ["plans", "recommendedStyle", "recommendationMessage"],
+        },
+      },
+    });
+
+    const text = response.text;
+    const data = JSON.parse(text);
+    return Response.json(data);
+
+  } catch (error) {
+    console.error(error);
+    return Response.json(
+      { error: "プラン生成に失敗しました" },
+      { status: 500 }
+    );
+  }
+}
+</file>
+
+<file path="lib/firestore.ts">
+import { addDoc, collection, doc, getDoc, updateDoc, setDoc, deleteDoc } from "firebase/firestore";
+import { db } from "./firebase";
+import { RouteDoc } from "@/types/route";
+import { LogDoc } from "@/types/log";
+import { query, where, orderBy, getDocs } from "firebase/firestore";
+
+export async function saveUser(user: { uid: string; displayName: string | null; email: string | null }) {
+  const userRef = doc(db, "users", user.uid);
+  await setDoc(userRef, {
+    displayName: user.displayName || "匿名ユーザー",
+    email: user.email,
+    createdAt: new Date().toISOString(),
+  }, { merge: true });
+}
+
+export async function saveRoute(route: RouteDoc) {
+  const docRef = await addDoc(collection(db, "routes"), route);
+  return docRef.id;
+}
+
+export async function getRoute(routeId: string) {
+  const docRef = doc(db, "routes", routeId);
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) throw new Error("ルートが見つかりません");
+  return { id: snap.id, ...snap.data() };
+}
+
+export async function updateStepDone(routeId: string, steps: RouteDoc["steps"]) {
+  const progress =
+    steps.length === 0
+      ? 0
+      : Math.round((steps.filter((step) => step.done).length / steps.length) * 100);
+  await updateDoc(doc(db, "routes", routeId), { steps, progress });
+}
+
+export async function saveLog(log: LogDoc) {
+  const docRef = await addDoc(collection(db, "logs"), log);
+  return docRef.id;
+}
+
+export async function getUserLogs(userId: string) {
+  const q = query(
+    collection(db, "logs"),
+    where("userId", "==", userId)
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as any[];
+}
+
+export async function getUserRoutes(userId: string) {
+  const q = query(
+    collection(db, "routes"),
+    where("userId", "==", userId),
+    orderBy("createdAt", "desc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as RouteDoc) }));
+}
+
+export async function deleteUserLog(logId: string) {
+  await deleteDoc(doc(db, "logs", logId));
+}
+
+export async function getActiveRoutes(userId: string) {
+  const q = query(
+    collection(db, "routes"),
+    where("userId", "==", userId),
+    orderBy("createdAt", "desc")
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as RouteDoc) }));
+}
+
+export async function getUserRouteSummary(userId: string): Promise<string> {
+  try {
+    const q = query(
+      collection(db, "routes"),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc")
+    );
+    const snap = await getDocs(q);
+    const routes = snap.docs.map((doc) => ({ ...(doc.data() as RouteDoc) }));
+
+    if (routes.length === 0) return "過去の旅の記録なし（初回ユーザー）";
+
+    const summary = routes.slice(0, 5).map((r) => {
+      const total = r.steps.length;
+      const done = r.steps.filter((s) => s.done).length;
+      const rate = total === 0 ? 0 : Math.round((done / total) * 100);
+      return `・目標「${r.goal}」: 完遂率${rate}%（${done}/${total}ステップ完了）`;
+    }).join("\n");
+
+    return summary;
+  } catch {
+    return "過去データ取得失敗";
+  }
+}
+</file>
+
+<file path="app/page.tsx">
+"use client";
+
+import { useState, useEffect, useMemo} from "react";
+import { useRouter } from "next/navigation";
+import Header from "@/components/Header";
+import { onAuthStateChanged, User } from "firebase/auth";
+import { auth } from "@/lib/firebase";
+import { getActiveRoutes, getUserRouteSummary } from "@/lib/firestore";
+import { RouteDoc } from "@/types/route";
+import Link from "next/link";
+
+type RawStep = {
+  title: string;
+  description: string;
+  scheduledDay: number;
+};
+
+type EditableStep = RawStep & {
+  _editing: boolean;
+};
+
+type Plan = {
+  style: "full_throttle" | "wayfinder" | "flow_state";
+  styleLabel: string;
+  styleEmoji: string;
+  philosophy: string;
+  tagline: string;
+  suitableFor: string;
+  tradeoff: string;
+  intensityLevel: number;
+  recommendedDays: number;
+  daysComment: string;
+  goal: string;
+  summary: string;
+  steps: RawStep[];
+};
+
+type EditablePlan = Omit<Plan, "steps"> & {
+  steps: EditableStep[];
+};
+
+type PlanResponse = {
+  plans: Plan[];
+  recommendedStyle: string;
+  recommendationMessage: string;
+};
+
+type RouteWithId = RouteDoc & { id: string };
+
+const styleConfig = {
+  full_throttle: {
+    bg: "border-red-300 bg-red-50",
+    badge: "bg-red-100 text-red-700",
+    meter: "bg-red-400",
+    button: "bg-red-700 hover:bg-red-800",
+    editBg: "bg-red-50 border-red-200",
+  },
+  wayfinder: {
+    bg: "border-blue-300 bg-blue-50",
+    badge: "bg-blue-100 text-blue-700",
+    meter: "bg-blue-400",
+    button: "bg-blue-700 hover:bg-blue-800",
+    editBg: "bg-blue-50 border-blue-200",
+  },
+  flow_state: {
+    bg: "border-emerald-300 bg-emerald-50",
+    badge: "bg-emerald-100 text-emerald-700",
+    meter: "bg-emerald-400",
+    button: "bg-emerald-700 hover:bg-emerald-800",
+    editBg: "bg-emerald-50 border-emerald-200",
+  },
+};
+
+export default function Home() {
+  const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [goal, setGoal] = useState("");
+  const [durationDays, setDurationDays] = useState(7);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [editablePlans, setEditablePlans] = useState<EditablePlan[] | null>(null);
+  const [recommendedStyle, setRecommendedStyle] = useState<string>("");
+  const [recommendationMessage, setRecommendationMessage] = useState<string>("");
+  const [activeRoutes, setActiveRoutes] = useState<RouteWithId[]>([]);
+  const [routesLoading, setRoutesLoading] = useState(false);
+
+  const [durationUnit, setDurationUnit] = useState<"day" | "week" | "month">("day");
+
+  const durationDays = useMemo(() => {
+    if (durationUnit === "day")   return durationValue;
+    if (durationUnit === "week")  return durationValue * 7;
+    if (durationUnit === "month") return durationValue * 30;
+    return durationValue;
+  }, [durationValue, durationUnit]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        setRoutesLoading(true);
+        try {
+          const routes = await getActiveRoutes(currentUser.uid);
+          const sorted = routes.sort((a, b) => {
+            if (a.progress < 100 && b.progress === 100) return -1;
+            if (a.progress === 100 && b.progress < 100) return 1;
+            return 0;
+          });
+          setActiveRoutes(sorted.slice(0, 5));
+        } catch (e) {
+          console.error(e);
+        } finally {
+          setRoutesLoading(false);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleGenerate = async () => {
+    if (!user) return;
+    setLoading(true);
+    setError("");
+    setEditablePlans(null);
+    try {
+      const userHistory = await getUserRouteSummary(user.uid);
+      const res = await fetch("/api/generate-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal, durationDays, message, userHistory }),
+      });
+      const data: PlanResponse = await res.json();
+      if (!res.ok) throw new Error((data as any).error || "プラン生成に失敗しました");
+      const editable: EditablePlan[] = data.plans.map((plan) => ({
+        ...plan,
+        steps: plan.steps.map((step) => ({ ...step, _editing: false })),
+      }));
+      setEditablePlans(editable);
+      setRecommendedStyle(data.recommendedStyle);
+      setRecommendationMessage(data.recommendationMessage);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "エラーが発生しました");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleEditStep = (planStyle: string, stepIndex: number) => {
+    setEditablePlans((prev) =>
+      prev
+        ? prev.map((plan) =>
+            plan.style === planStyle
+              ? {
+                  ...plan,
+                  steps: plan.steps.map((step, i) =>
+                    i === stepIndex ? { ...step, _editing: !step._editing } : step
+                  ),
+                }
+              : plan
+          )
+        : prev
+    );
+  };
+
+  const updateStepField = (
+    planStyle: string,
+    stepIndex: number,
+    field: keyof RawStep,
+    value: string | number
+  ) => {
+    setEditablePlans((prev) =>
+      prev
+        ? prev.map((plan) =>
+            plan.style === planStyle
+              ? {
+                  ...plan,
+                  steps: plan.steps.map((step, i) =>
+                    i === stepIndex ? { ...step, [field]: value } : step
+                  ),
+                }
+              : plan
+          )
+        : prev
+    );
+  };
+
+  const handleSelectPlan = async (plan: EditablePlan) => {
+    if (!user) return;
+    setSaving(true);
+    try {
+      const cleanSteps = plan.steps.map(({ _editing, ...rest }) => rest);
+      const saveRes = await fetch("/api/save-route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.uid,
+          goal: plan.goal,
+          durationDays: plan.recommendedDays,
+          message,
+          summary: plan.summary,
+          steps: cleanSteps,
+        }),
+      });
+      const saveData = await saveRes.json();
+      if (!saveRes.ok) throw new Error(saveData.error || "保存に失敗しました");
+      router.push(`/map/${saveData.routeId}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存に失敗しました");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <main className="min-h-screen bg-amber-50 p-6 text-gray-800">
+      <div className="mx-auto max-w-2xl">
+        <h1 className="mb-2 text-4xl font-bold">Route & Root</h1>
+        <p className="mb-6 text-lg text-gray-600">
+          目標を入力すると、AI が旅のしおりを作ってくれます。
+        </p>
+        <Header />
+
+        {/* ── 新しい目標入力フォーム ── */}
+        {!editablePlans && (
+          <div className="rounded-2xl bg-white p-6 shadow">
+            <h2 className="mb-4 font-bold text-gray-700">✦ 新しい旅を始める</h2>
+            <div className="mb-4">
+              <label className="mb-2 block font-semibold">目標</label>
+              <input
+                type="text"
+                value={goal}
+                onChange={(e) => setGoal(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 p-3"
+                placeholder="例：Blenderで3Dモデリングをマスターする"
+              />
+            </div>
+            {/* 期間入力 */}
+            <div className="mb-4">
+              <label className="mb-2 block font-semibold">期間</label>
+              <div className="flex gap-2">
+                <input
+                  type="number"
+                  value={durationValue}
+                  onChange={(e) => setDurationValue(Number(e.target.value))}
+                  className="w-24 rounded-lg border border-gray-300 p-3"
+                  min={1}
+                />
+                <select
+                  value={durationUnit}
+                  onChange={(e) => setDurationUnit(e.target.value as "day" | "week" | "month")}
+                  className="flex-1 rounded-lg border border-gray-300 p-3 bg-white"
+                >
+                  <option value="day">日</option>
+                  <option value="week">週</option>
+                  <option value="month">ヶ月</option>
+                </select>
+              </div>
+              <p className="mt-1 text-xs text-gray-400">
+                = {durationDays} 日間
+              </p>
+            </div>
+
+            <div className="mb-4">
+              <label className="mb-2 block font-semibold">自分への一言</label>
+              <textarea
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 p-3"
+                rows={3}
+              />
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={loading || !goal || !user}
+              className="rounded-xl bg-orange-500 px-6 py-3 font-semibold text-white disabled:opacity-50"
+            >
+              {loading ? "3つのプランを生成中..." : !user ? "ログインしてください" : "プランを見る"}
+            </button>
+            {error && <p className="mt-4 text-red-600">{error}</p>}
+          </div>
+        )}
+
+        {/* ── 進行中の旅（カルーセル） ── */}
+        {user && !editablePlans && (
+          <div className="mt-6">
+            {routesLoading ? (
+              <div className="flex justify-center py-6">
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-orange-400 border-t-transparent" />
+              </div>
+            ) : activeRoutes.filter(r => r.progress < 100).length > 0 ? (
+              <>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="font-bold text-gray-700">🚶 進行中の旅</h2>
+                  <Link href="/history" className="text-xs text-orange-400 underline">
+                    すべて見る →
+                  </Link>
+                </div>
+                <div
+                  className="flex gap-3 overflow-x-auto pb-3 -mx-2 px-2"
+                  style={{ scrollSnapType: "x mandatory" }}
+                >
+                  {activeRoutes
+                    .filter(r => r.progress < 100)
+                    .slice(0, 5)
+                    .map((route) => {
+                      const completedCount = route.steps.filter((s) => s.done).length;
+                      return (
+                        <div
+                          key={route.id}
+                          className="shrink-0 w-64 rounded-2xl border border-orange-200 bg-white p-4 shadow-sm"
+                          style={{ scrollSnapAlign: "start" }}
+                        >
+                          <p className="mb-2 text-sm font-bold text-gray-800 line-clamp-2 leading-snug">
+                            {route.goal}
+                          </p>
+                          <div className="mb-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                            <div
+                              className="h-full rounded-full bg-orange-400 transition-all"
+                              style={{ width: `${route.progress}%` }}
+                            />
+                          </div>
+                          <p className="mb-3 text-xs text-gray-400">
+                            {completedCount}/{route.steps.length} ステップ完了　{route.progress}%
+                          </p>
+                          <div className="flex gap-2">
+                            <Link
+                              href={`/map/${route.id}`}
+                              className="flex-1 rounded-lg bg-orange-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-orange-600"
+                            >
+                              🗺️ マップ
+                            </Link>
+                            <Link
+                              href={`/garden/${route.id}`}
+                              className="flex-1 rounded-lg bg-emerald-500 py-1.5 text-center text-xs font-bold text-white transition hover:bg-emerald-600"
+                            >
+                              🍎 農園
+                            </Link>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              </>
+            ) : (
+              <div className="rounded-2xl border border-dashed border-orange-200 bg-white p-4 text-center">
+                <p className="text-sm text-gray-400">進行中の旅はありません</p>
+                <Link href="/history" className="mt-1 inline-block text-xs text-orange-400 underline">
+                  過去の旅を見る
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── プラン選択・プレ編集カード ── */}
+        {editablePlans && (
+          <div>
+            <div className="mb-6 flex items-center justify-between">
+              <h2 className="text-2xl font-bold">どのルートで旅しますか？</h2>
+              <button onClick={() => setEditablePlans(null)} className="text-sm text-gray-500 underline">
+                ← 入力に戻る
+              </button>
+            </div>
+
+            {/* AIからの推薦メッセージ */}
+            {recommendationMessage && (
+              <div className="mb-6 rounded-2xl border-2 border-orange-200 bg-white p-5 shadow-sm">
+                <div className="mb-2 flex items-center gap-2">
+                  <span className="text-2xl">🤖</span>
+                  <span className="text-sm font-bold text-orange-600">AIコーチからのアドバイス</span>
+                </div>
+                <p className="text-sm leading-relaxed text-gray-700">{recommendationMessage}</p>
+              </div>
+            )}
+
+            <div className="space-y-6">
+              {editablePlans.map((plan) => {
+                const config = styleConfig[plan.style];
+                const diff = plan.recommendedDays - durationDays;
+                return (
+                  <div key={plan.style} className={`rounded-2xl border-2 p-6 ${config.bg}`}>
+
+                    {/* ヘッダー */}
+                    <div className="mb-4 flex items-center justify-between">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-3xl">{plan.styleEmoji}</span>
+                        <span className={`rounded-full px-3 py-1 text-sm font-bold ${config.badge}`}>
+                          {plan.styleLabel}
+                        </span>
+                        {plan.style === recommendedStyle && (
+                          <span className="rounded-full bg-yellow-400 px-3 py-1 text-xs font-black text-yellow-900 shadow-sm">
+                            ✦ Most Suitable
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="mr-1 text-xs text-gray-400">気合度</span>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <div key={n} className={`h-2 w-4 rounded-full ${n <= plan.intensityLevel ? config.meter : "bg-gray-200"}`} />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* 哲学・タグライン */}
+                    <p className="mb-1 text-lg font-bold text-gray-800">"{plan.philosophy}"</p>
+                    <p className={`mb-4 text-sm font-semibold ${config.badge.split(" ")[1]}`}>{plan.tagline}</p>
+
+                    {/* 期間バッジ */}
+                    <div className="mb-4 flex items-center gap-3">
+                      <div className={`rounded-xl px-4 py-2 text-center ${config.badge}`}>
+                        <p className="text-xs font-semibold opacity-70">AI提案期間</p>
+                        <p className="text-2xl font-black">{plan.recommendedDays}<span className="text-sm font-normal">日</span></p>
+                      </div>
+                      <div className="flex-1">
+                        {diff < 0 && <p className="text-sm font-bold text-red-600">⚡ 希望より{Math.abs(diff)}日短縮</p>}
+                        {diff === 0 && <p className="text-sm font-bold text-blue-600">🧭 希望通りの期間</p>}
+                        {diff > 0 && <p className="text-sm font-bold text-emerald-600">🌊 希望より{diff}日ゆとりを持たせます</p>}
+                        <p className="mt-1 text-xs italic text-gray-500">{plan.daysComment}</p>
+                      </div>
+                    </div>
+
+                    {/* 向いている人・トレードオフ */}
+                    <div className="mb-4 space-y-1 rounded-xl bg-white/60 p-3 text-sm">
+                      <p className="text-gray-600"><span className="font-semibold">👤 向いている人：</span>{plan.suitableFor}</p>
+                      <p className="italic text-gray-500"><span className="font-semibold not-italic">⚖️ トレードオフ：</span>{plan.tradeoff}</p>
+                    </div>
+
+                    {/* ステップ一覧（プレ編集可能） */}
+                    <div className="mb-4 space-y-2">
+                      <p className="text-xs font-bold text-gray-500">✏️ ステップを編集できます（保存前に調整可）</p>
+                      {plan.steps.map((step, stepIndex) => (
+                        <div
+                          key={stepIndex}
+                          className={`rounded-xl border p-3 min-h-[80px] flex flex-col justify-between ${config.editBg}`}
+                        >
+                          {step._editing ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="shrink-0 text-xs font-bold text-gray-500">Day</span>
+                                <input
+                                  type="number"
+                                  value={step.scheduledDay}
+                                  min={1}
+                                  max={plan.recommendedDays}
+                                  onChange={(e) => updateStepField(plan.style, stepIndex, "scheduledDay", Number(e.target.value))}
+                                  className="w-16 rounded-lg border border-gray-300 bg-white p-1 text-center text-sm font-bold focus:outline-none"
+                                />
+                              </div>
+                              <input
+                                type="text"
+                                value={step.title}
+                                onChange={(e) => updateStepField(plan.style, stepIndex, "title", e.target.value)}
+                                className="w-full rounded-lg border border-gray-300 bg-white p-2 text-sm font-bold focus:outline-none"
+                                placeholder="ステップのタイトル"
+                              />
+                              <textarea
+                                value={step.description}
+                                onChange={(e) => updateStepField(plan.style, stepIndex, "description", e.target.value)}
+                                className="w-full rounded-lg border border-gray-300 bg-white p-2 text-xs focus:outline-none"
+                                rows={2}
+                                placeholder="ステップの説明"
+                              />
+                              <button
+                                onClick={() => toggleEditStep(plan.style, stepIndex)}
+                                className="rounded-lg bg-gray-700 px-3 py-1 text-xs font-bold text-white"
+                              >
+                                確定
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs font-bold text-gray-400">Day {step.scheduledDay}</p>
+                                <p className="text-sm font-bold text-gray-800 truncate">
+                                  {step.title}
+                                </p>
+                                <div className="group relative">
+                                  <p className="text-xs text-gray-500 line-clamp-2">
+                                    {step.description}
+                                  </p>
+                                  {step.description.length > 40 && (
+                                    <div className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-xl border border-gray-200 bg-white p-3 text-xs text-gray-700 shadow-xl group-hover:block animate-in fade-in zoom-in duration-200">
+                                      {step.description}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => toggleEditStep(plan.style, stepIndex)}
+                                className="shrink-0 rounded-lg bg-white/80 px-2 py-1 text-xs text-gray-400 hover:text-gray-700 border border-gray-200"
+                              >
+                                ✏️
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* 出発ボタン */}
+                    <button
+                      onClick={() => handleSelectPlan(plan)}
+                      disabled={saving}
+                      className={`w-full rounded-xl py-3 font-bold text-white transition ${config.button} disabled:opacity-50`}
+                    >
+                      {saving ? "準備中..." : "このルートで旅を始める →"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            {error && <p className="mt-4 text-red-600">{error}</p>}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+</file>
+
+<file path="app/garden/[routeId]/page.tsx">
+"use client";
+
+import { useState, use, useEffect, useRef } from "react"; 
+import { auth } from "@/lib/firebase"; 
+import { onAuthStateChanged, User } from "firebase/auth";
+import AppleTree from "@/components/AppleTree";
+import HarvestModal from "@/components/HarvestModal";
+import Link from "next/link";
+import { AppleVariety, APPLE_NAMES, APPLE_COLORS } from "@/lib/apple"; 
+
+export default function GardenPage({ params }: { params: Promise<{ routeId: string }> }) {
+  const { routeId } = use(params);
+
+  // 1. 状態管理
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [nutrition, setNutrition] = useState(0);
+  const [hasGrown, setHasGrown] = useState(false);
+  const [useMood, setUseMood] = useState(false); 
+  const [mood, setMood] = useState(3);
+  const [memo, setMemo] = useState("");
+  const [isWatering, setIsWatering] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [aiMessage, setAiMessage] = useState("");
+  const [pendingApples, setPendingApples] = useState<any[]>([]);
+  const [routeName, setRouteName] = useState("");
+  const [variety, setVariety] = useState<AppleVariety>('forest');
+
+  // マルチモーダル用
+  const [image, setImage] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const recognitionRef = useRef<any>(null); // 音声認識用
+
+  const pendingCount = pendingApples.length;
+  const isFull = nutrition >= 100;
+
+  // 2. 音声認識のセットアップ（Web Speech API）
+  useEffect(() => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.lang = 'ja-JP';
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+
+      recognitionRef.current.onresult = (event: any) => {
+        let transcript = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        setMemo(prev => prev + transcript); // メモ欄に直接書き込む
+      };
+
+      recognitionRef.current.onerror = () => setIsRecording(false);
+      recognitionRef.current.onend = () => setIsRecording(false);
+    }
+  }, []);
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      recognitionRef.current?.stop();
+    } else {
+      setIsRecording(true);
+      recognitionRef.current?.start();
+    }
+  };
+
+  // ... (ログイン・データ取得・自動保存のuseEffectなどは以前と同じ)
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => setUser(currentUser));
+    async function fetchRoute() {
+      try {
+        const res = await fetch(`/api/get-route?routeId=${routeId}`);
+        const data = await res.json();
+        setRouteName(data.goal || "無題の目標");
+        setHasGrown(data.hasGrown || false);
+        setNutrition(data.nutrition || 0);
+        setPendingApples(data.pendingApples || []);
+        setVariety(data.currentVariety || 'forest');
+      } catch (e) { console.error(e); } finally { setLoading(false); }
+    }
+    fetchRoute();
+    return () => unsubscribe();
+  }, [routeId]);
+
+  const saveProgress = async (newN: number, newA: any[], curV: string, grown: boolean) => {
+    try {
+      await fetch("/api/update-route-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ routeId, nutrition: newN, pendingApples: newA, variety: curV, hasGrown: grown }),
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleGiveNutrition = async () => {
+    if (isFull) return;
+    const hasInput = useMood || memo.trim() || image;
+    if (!hasInput) return alert("今日の頑張りを見せてください🌱");
+
+    setIsWatering(true);
+    try {
+      const response = await fetch("/api/generate-apple", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moodScore: useMood ? mood : null, note: memo.trim(), image: image }),
+      });
+      const data = await response.json();
+
+      const nextNutrition = Math.min(nutrition + 25, 100);
+      let nextApples = [...pendingApples];
+      const existingIndex = nextApples.findIndex(a => a.variety === data.variety);
+      const newNote = memo.trim() || (image ? "（写真で報告）" : "（養分を注いだ）");
+
+      if (existingIndex !== -1) {
+        nextApples[existingIndex] = {
+          ...nextApples[existingIndex],
+          note: nextApples[existingIndex].note + " | " + newNote,
+          comment: data.message,
+          createdAt: new Date().toISOString()
+        };
+      } else {
+        nextApples.push({ variety: data.variety, note: newNote, moodScore: useMood ? mood : null, comment: data.message, createdAt: new Date().toISOString() });
+      }
+
+      setVariety(data.variety);
+      setPendingApples(nextApples);
+      setNutrition(nextNutrition);
+      const nextHasGrown = nextNutrition === 100 ? true : hasGrown;
+      setHasGrown(nextHasGrown);
+      setAiMessage(data.message);
+      setMemo(""); setImage(null);
+      saveProgress(nextNutrition, nextApples, data.variety, nextHasGrown);
+    } finally { setIsWatering(false); }
+  };
+
+  const handleCloseModal = () => {
+    setShowModal(false); setPendingApples([]); setNutrition(0); setAiMessage("");
+    saveProgress(0, [], variety, true); 
+  };
+
+  let treeLevel = hasGrown ? 2 : (nutrition < 30 ? 0 : nutrition < 60 ? 1 : 2);
+
+  if (loading) return <div className="p-10 text-center font-bold">農園を準備中...</div>;
+
+  return (
+    <div className="min-h-screen bg-orange-50 p-6 pb-32 flex flex-col items-center">
+      <header className="mb-8 text-center">
+        <h1 className="text-3xl font-black text-orange-900">🍎 {routeName} 農園</h1>
+      </header>
+
+      <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-8 items-start mb-10">
+        
+        {/* 左側：入力エリア（複数同時入力可能UI） */}
+        <div className="bg-white p-8 rounded-[40px] shadow-xl border-4 border-orange-100 space-y-6">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xl font-black text-slate-700">📝 今日の養分</h2>
+            <div className="flex gap-2">
+              {/* 写真追加ボタン */}
+              <label className="cursor-pointer bg-orange-50 p-2 rounded-xl border border-orange-100 hover:bg-orange-100 transition-colors">
+                <span>📷</span>
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) {
+                    const r = new FileReader();
+                    r.onloadend = () => setImage(r.result as string);
+                    r.readAsDataURL(file);
+                  }
+                }} />
+              </label>
+              {/* 音声入力ボタン */}
+              <button 
+                onClick={toggleRecording}
+                className={`p-2 rounded-xl border transition-all ${isRecording ? 'bg-red-500 border-red-600 animate-pulse' : 'bg-orange-50 border-orange-100'}`}
+              >
+                <span>{isRecording ? '🛑' : '🎙️'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* メモ入力（常に表示） */}
+          <div className="relative">
+            <textarea 
+              className="w-full p-4 bg-orange-50/20 border-2 border-orange-100 text-slate-900 font-bold rounded-2xl h-32 outline-none focus:border-orange-500 transition-all text-sm"
+              placeholder={isRecording ? "音声を聞き取っています..." : "写真の説明や頑張りをメモ..."}
+              value={memo} 
+              onChange={(e) => setMemo(e.target.value)} 
+            />
+            {isRecording && <div className="absolute top-2 right-2 flex gap-1"><span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce"></span><span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-bounce [animation-delay:0.2s]"></span></div>}
+          </div>
+
+          {/* 画像プレビュー（ある時だけ表示） */}
+          {image && (
+            <div className="relative w-full h-32 rounded-2xl overflow-hidden border-2 border-orange-200">
+              <img src={image} className="w-full h-full object-cover" />
+              <button onClick={() => setImage(null)} className="absolute top-2 right-2 bg-black/50 text-white w-6 h-6 rounded-full text-xs">✕</button>
+            </div>
+          )}
+
+          <div className="bg-orange-50/50 p-4 rounded-2xl border-2 border-orange-100">
+            <div className="flex items-center justify-between mb-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={useMood} onChange={(e) => setUseMood(e.target.checked)} className="w-5 h-5 accent-orange-500" />
+                <span className="font-bold text-slate-700 text-sm">やる気レバー</span>
+              </label>
+              {useMood && <span className="text-orange-500 font-black px-2 py-1 bg-white rounded-lg shadow-sm text-xs">Lv.{mood}</span>}
+            </div>
+            <input type="range" min="1" max="5" value={mood} disabled={!useMood} onChange={(e) => setMood(Number(e.target.value))} className={`w-full ${useMood ? 'accent-orange-500' : 'opacity-30'}`} />
+          </div>
+
+          <button 
+            onClick={handleGiveNutrition} 
+            disabled={isWatering} 
+            className="w-full py-5 text-white font-black rounded-3xl shadow-lg transition-all active:scale-95" 
+            style={{ backgroundColor: APPLE_COLORS[variety] }}
+          >
+            {isWatering ? "吸収中..." : isFull ? `🍎 収穫可能です！` : `養分を注ぐ (${nutrition}%) 💧`}
+          </button>
+        </div>
+
+        {/* 右側：木のエフェクト（省略なし） */}
+        <div className="relative overflow-hidden flex flex-col items-center justify-center bg-white p-8 rounded-[40px] shadow-xl border-4 border-emerald-100 min-h-[480px]">
+          {isWatering && (
+            <div className="absolute inset-0 pointer-events-none z-20">
+              {[...Array(6)].map((_, i) => (
+                <span key={i} className="absolute text-2xl animate-drop" style={{ left: `${20 + i * 15}%`, color: APPLE_COLORS[variety], animationDelay: `${i * 0.1}s` }}>💧</span>
+              ))}
+            </div>
+          )}
+          <AppleTree level={treeLevel} variety={variety === 'rare' ? 'sun' : variety} hasApple={pendingCount > 0} moodScore={useMood ? mood : 3} />
+          <div className="mt-8 w-full max-w-xs text-center">
+            <div className="flex justify-between text-[10px] font-black mb-2 uppercase tracking-widest" style={{ color: APPLE_COLORS[variety] }}>
+              <span>Growth</span><span>{nutrition}%</span>
+            </div>
+            <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden border-2 border-emerald-50">
+              <div className="h-full transition-all duration-1000" style={{ width: `${nutrition}%`, backgroundColor: APPLE_COLORS[variety] }} />
+            </div>
+          </div>
+          {aiMessage && (
+            <div className="mt-6 p-4 bg-orange-50 border-2 border-orange-200 rounded-2xl shadow-sm mx-4 animate-in zoom-in fade-in">
+              <p className="text-[9px] font-black text-orange-400 uppercase mb-1 text-center">園主の言葉</p>
+              <p className="text-sm text-slate-700 font-bold italic text-center">「{aiMessage}」</p>
+            </div>
+          )}
+        </div>
+      </div>
+      
+      <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl flex justify-around items-center z-40">
+        <Link href={`/map/${routeId}`} className="flex flex-col items-center gap-1">🗺️<span className="text-[10px] font-black text-slate-400">マップ</span></Link>
+        <Link href={`/collection/${user?.uid || 'guest'}?from=${routeId}`} className="flex flex-col items-center gap-1">📦<span className="text-[10px] font-black text-slate-400">貯蔵庫</span></Link>
+        <Link href="/history" className="flex flex-col items-center gap-1">📜<span className="text-[10px] font-black text-slate-400">履歴</span></Link>
+      </footer>
+      {showModal && <HarvestModal apples={pendingApples} onClose={handleCloseModal} />}
+      <style jsx global>{`@keyframes drop { 0% { transform: translateY(-50px); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(300px); opacity: 0; } } .animate-drop { display: inline-block; animation: drop linear infinite; animation-duration: 0.8s; }`}</style>
+    </div>
+  );
+}
+</file>
+
+</files>
