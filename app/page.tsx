@@ -87,6 +87,7 @@ export default function Home() {
   }, [durationValue, durationUnit]);
   const [currentLevel, setCurrentLevel] = useState("");
   const [constraints, setConstraints] = useState("");
+  const [message, setMessage] = useState("");
   const [deepQuestion, setDeepQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -137,6 +138,7 @@ export default function Home() {
         const combined = [
           currentLevel ? `【現在地】${currentLevel}` : "",
           constraints ? `【制約・リソース】${constraints}` : "",
+          message ? `【自分へのメッセージ】${message}` : "",
           deepQuestion ? `【この旅で本当に変えたいこと】${deepQuestion}` : "",
         ].filter(Boolean).join("\n");
 
@@ -314,6 +316,20 @@ export default function Home() {
                 onChange={(e) => setConstraints(e.target.value)}
                 className="w-full rounded-lg border border-gray-300 p-3 focus:border-orange-400 focus:outline-none"
                 placeholder="例：平日1時間・土日3時間。数学は苦手"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="mb-1 block font-semibold text-gray-700">
+                💬 自分への一言
+                <span className="ml-2 text-xs font-normal text-gray-400">旅に出る自分へのメッセージ</span>
+              </label>
+              <input
+                type="text"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 p-3 focus:border-orange-400 focus:outline-none"
+                placeholder="例：毎日少しずつでも前に進もう"
               />
             </div>
 

@@ -391,108 +391,102 @@ export default function MissionMap({ routeId, goal, summary, progress, steps, ph
         </div>
       )}
 
-      {/* ── モーダル：達成診断 ＆ おすそわけ ── */}
-{showDiagnosis && (
-  <div className="fixed inset-0 z-50 overflow-y-auto bg-black/80 backdrop-blur-md p-4">
-    {/* items-centerを外し、min-h-full + flex + justify-centerにすることで、長い時は上から表示されるようになります */}
-    <div className="flex min-h-full items-start justify-center py-8"> 
-      <div className="bg-white rounded-[40px] p-8 max-w-lg w-full shadow-2xl animate-in zoom-in duration-300">
-         <div className="text-center mb-8">
-            <div className="text-6xl mb-4">🏆</div>
-            <h2 className="text-2xl font-black text-slate-800 leading-tight">{goal} を完遂！</h2>
-            <p className="text-[10px] text-slate-400 font-bold tracking-[0.2em] mt-2">CONGRATULATIONS</p>
-         </div>
+      {/* ── モーダル：達成診断 ＆ おすそわけ（↑の豪華版グラフを移植） ── */}
+      {showDiagnosis && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="bg-white rounded-[40px] p-8 max-w-lg w-full shadow-2xl my-8">
+             <div className="text-center mb-8">
+                <div className="text-6xl mb-4">🏆</div>
+                <h2 className="text-2xl font-black text-slate-800 leading-tight">{goal} を完遂！</h2>
+                <p className="text-[10px] text-slate-400 font-bold tracking-[0.2em] mt-2">CONGRATULATIONS</p>
+             </div>
 
-         {diagnosisLoading ? (
-           <div className="text-center py-12">
-             <div className="animate-spin h-10 w-10 border-4 border-sky-500 border-t-transparent rounded-full inline-block" />
-             <p className="mt-4 text-slate-400 font-bold text-sm">AIコーチが旅を振り返っています...</p>
-           </div>
-         ) : (
-           <div className="space-y-6">
-             {chartData && (
-               <div className="space-y-4">
-                 {/* グラフ1: 難易度 & やる気 */}
-                 <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100">
-                    <p className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">Step Motivation Track</p>
-                    <div className="flex items-end gap-1.5 h-24">
-                       {chartData.energies.map((e:any, i:number) => {
-                         const feeling = chartData.feelings[i];
-                         const barColor = feeling === "バッチリ" ? "#10b981" : feeling === "微妙" ? "#ef4444" : "#f97316";
-                         return (
-                           <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                             <div className="w-full rounded-t-lg transition-all duration-1000" style={{ height: `${e * 16}px`, background: barColor, opacity: 0.8 }} />
-                             <span className="text-[7px] text-slate-300 font-bold">S{i+1}</span>
-                           </div>
-                         );
-                       })}
-                    </div>
+             {diagnosisLoading ? (
+               <div className="text-center py-12"><div className="animate-spin h-10 w-10 border-4 border-sky-500 border-t-transparent rounded-full inline-block" /><p className="mt-4 text-slate-400 font-bold text-sm">AIコーチが旅を振り返っています...</p></div>
+             ) : (
+               <div className="space-y-6">
+                 {chartData && (
+                   <div className="space-y-4">
+                     {/* グラフ1: 難易度 & やる気 */}
+                     <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100">
+                        <p className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">Step Motivation Track</p>
+                        <div className="flex items-end gap-1.5 h-24">
+                           {chartData.energies.map((e:any, i:number) => {
+                             const feeling = chartData.feelings[i];
+                             const barColor = feeling === "バッチリ" ? "#10b981" : feeling === "微妙" ? "#ef4444" : "#f97316";
+                             return (
+                               <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                                 <div className="w-full rounded-t-lg transition-all duration-1000" style={{ height: `${e * 16}px`, background: barColor, opacity: 0.8 }} />
+                                 <span className="text-[7px] text-slate-300 font-bold">S{i+1}</span>
+                               </div>
+                             );
+                           })}
+                        </div>
+                     </div>
+
+                     {/* グラフ2: 達成感の内訳 */}
+                     <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100 text-center">
+                        <p className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">Satisfaction Ratio</p>
+                        <div className="flex gap-2">
+                           {(["バッチリ", "まあまあ", "微妙"] as const).map((label) => {
+                              const count = chartData.feelings.filter((f:any) => f === label).length;
+                              const pct = Math.round(count / chartData.feelings.length * 100);
+                              const color = label === "バッチリ" ? "#10b981" : label === "微妙" ? "#ef4444" : "#f97316";
+                              return (
+                                <div key={label} className="flex-1 bg-white rounded-2xl p-3 border border-slate-100 shadow-sm">
+                                  <div className="text-lg font-black" style={{ color }}>{pct}%</div>
+                                  <div className="text-[8px] text-slate-400 font-bold">{label}</div>
+                                </div>
+                              );
+                           })}
+                        </div>
+                     </div>
+                   </div>
+                 )}
+
+                 {/* AI診断テキスト */}
+                 <div className="bg-sky-50 rounded-3xl p-6 border-2 border-sky-100">
+                    <p className="text-[10px] font-black text-sky-400 uppercase mb-3 tracking-widest">🤖 AI Journey Diagnosis</p>
+                    <p className="text-sm font-bold leading-relaxed text-slate-700 whitespace-pre-wrap">{diagnosisText}</p>
                  </div>
 
-                 {/* グラフ2: 達成感の内訳 */}
-                 <div className="bg-slate-50 rounded-3xl p-5 border border-slate-100 text-center">
-                    <p className="text-[10px] font-black text-slate-400 uppercase mb-4 tracking-widest">Satisfaction Ratio</p>
-                    <div className="flex gap-2">
-                       {(["バッチリ", "まあまあ", "微妙"] as const).map((label) => {
-                          const count = chartData.feelings.filter((f:any) => f === label).length;
-                          const pct = Math.round(count / (chartData.feelings.length || 1) * 100);
-                          const color = label === "バッチリ" ? "#10b981" : label === "微妙" ? "#ef4444" : "#f97316";
-                          return (
-                            <div key={label} className="flex-1 bg-white rounded-2xl p-3 border border-slate-100 shadow-sm">
-                              <div className="text-lg font-black" style={{ color }}>{pct}%</div>
-                              <div className="text-[8px] text-slate-400 font-bold">{label}</div>
-                            </div>
-                          );
-                       })}
-                    </div>
+                 {/* おすそわけフォーム */}
+                 <div className="bg-slate-50 rounded-3xl p-5 border border-slate-200">
+                    <label className="flex items-center gap-3 cursor-pointer mb-3">
+                      <input type="checkbox" checked={shareToOrchard} onChange={e => setShareToOrchard(e.target.checked)} className="w-5 h-5 rounded-lg accent-sky-500" />
+                      <span className="text-sm font-black text-slate-700">この旅をみんなにおすそわけする 🐝</span>
+                    </label>
+                    {shareToOrchard && (
+                      <div className="pl-8 space-y-3">
+                        <textarea placeholder="仲間への一言（任意）" value={shareComment} onChange={e => setShareComment(e.target.value)} className="w-full p-3 rounded-2xl border border-slate-200 bg-white text-xs min-h-[60px] resize-none focus:outline-none focus:border-sky-300" />
+                      </div>
+                    )}
                  </div>
+
+                 <button
+                   disabled={sharePosting}
+                   onClick={async () => {
+                     try {
+                        if (shareToOrchard) {
+                          setSharePosting(true);
+                          await fetch("/api/update-route-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ routeId, isPublic: true }) });
+                          await fetch("/api/share-to-orchard", {
+                            method: "POST", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ userId: user?.uid, routeId, goal: shareGoal ? goal : null, comment: shareComment, source: "completion", diagnosisText: shareDiagnosis ? diagnosisText : null, chartData: shareChart ? chartData : null }),
+                          });
+                        }
+                        router.push(`/collection/${routeId}`);
+                     } catch (e) { console.error(e); } finally { setSharePosting(false); }
+                   }}
+                   className="block w-full py-5 rounded-[28px] bg-emerald-500 text-center font-black text-white text-lg shadow-xl shadow-emerald-100 hover:bg-emerald-600 transition-all active:scale-95"
+                 >
+                   {sharePosting ? "投稿中..." : "情熱の結晶を確認する 📦"}
+                 </button>
                </div>
              )}
-
-             {/* AI診断テキスト */}
-             <div className="bg-sky-50 rounded-3xl p-6 border-2 border-sky-100">
-                <p className="text-[10px] font-black text-sky-400 uppercase mb-3 tracking-widest">🤖 AI Journey Diagnosis</p>
-                <p className="text-sm font-bold leading-relaxed text-slate-700 whitespace-pre-wrap">{diagnosisText}</p>
-             </div>
-
-             {/* おすそわけフォーム */}
-             <div className="bg-slate-50 rounded-3xl p-5 border border-slate-200">
-                <label className="flex items-center gap-3 cursor-pointer mb-3">
-                  <input type="checkbox" checked={shareToOrchard} onChange={e => setShareToOrchard(e.target.checked)} className="w-5 h-5 rounded-lg accent-sky-500" />
-                  <span className="text-sm font-black text-slate-700">この旅をみんなにおすそわけする 🐝</span>
-                </label>
-                {shareToOrchard && (
-                  <div className="pl-8 space-y-3">
-                    <textarea placeholder="仲間への一言（任意）" value={shareComment} onChange={e => setShareComment(e.target.value)} className="w-full p-3 rounded-2xl border border-slate-200 bg-white text-xs min-h-[60px] resize-none focus:outline-none focus:border-sky-300" />
-                  </div>
-                )}
-             </div>
-
-             <button
-               disabled={sharePosting}
-               onClick={async () => {
-                 try {
-                    if (shareToOrchard) {
-                      setSharePosting(true);
-                      await fetch("/api/update-route-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ routeId, isPublic: true }) });
-                      await fetch("/api/share-to-orchard", {
-                        method: "POST", headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ userId: user?.uid, routeId, goal: shareGoal ? goal : null, comment: shareComment, source: "completion", diagnosisText: shareDiagnosis ? diagnosisText : null, chartData: shareChart ? chartData : null }),
-                      });
-                    }
-                    router.push(`/collection/${routeId}`);
-                 } catch (e) { console.error(e); } finally { setSharePosting(false); }
-               }}
-               className="block w-full py-5 rounded-[28px] bg-emerald-500 text-center font-black text-white text-lg shadow-xl shadow-emerald-100 hover:bg-emerald-600 transition-all active:scale-95"
-             >
-               {sharePosting ? "投稿中..." : "貯蔵庫で情熱の結晶を確認する 📦"}
-             </button>
-           </div>
-         )}
-      </div>
-    </div>
-  </div>
-)}
+          </div>
+        </div>
+      )}
 
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
