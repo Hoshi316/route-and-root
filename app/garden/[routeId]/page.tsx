@@ -24,7 +24,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
   const [aiMessage, setAiMessage] = useState("");
   const [pendingApples, setPendingApples] = useState<any[]>([]);
   const [routeName, setRouteName] = useState("");
-  const [variety, setVariety] = useState<AppleVariety>('forest');
+  const [variety, setVariety] = useState<AppleVariety>('green');
   const [currentStep, setCurrentStep] = useState<{ scheduledDay: number; title: string } | null>(null);
   
   // ★ ミツバチ応援による追加ステート
@@ -234,7 +234,7 @@ export default function GardenPage({ params }: { params: Promise<{ routeId: stri
           )}
 
           <div style={{ transform: `scale(${1 + (seeds * 0.02 > 0.3 ? 0.3 : seeds * 0.02)})`, transition: "all 1s ease-out" }}>
-            <AppleTree level={treeLevel} variety={variety === 'rare' ? 'sun' : variety} hasApple={pendingCount > 0} moodScore={useMood ? mood : 3} />
+            <AppleTree level={treeLevel} isPlanted={isCompleted} variety={variety} hasApple={pendingCount > 0} moodScore={useMood ? mood : 3} />
           </div>
 
           <div className="mt-8 w-full max-w-xs text-center relative z-10">

@@ -2,7 +2,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { getUserLogs } from "@/lib/firestore";
 import { AppleVariety, APPLE_NAMES, APPLE_COLORS } from "@/lib/apple";
 import { auth } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
@@ -19,6 +18,22 @@ type AppleLog = {
   source?: 'garden' | 'step';
   stepDay?: number | null;
   stepTitle?: string | null;
+};
+
+// ★ 品種名から実際のSVGファイル名への変換マップ
+const varietyToFileName: Record<string, string> = {
+  red: "apple-sun",
+  green: "apple-forest",
+  purple: "apple-midnight",
+  gold: "apple-rare",
+  pink: "pink",
+  blue: "blue",
+  yellow: "yellow",
+  orange: "orange",
+  sakura: "sakura",
+  nashi: "nashi",
+  suika: "suika",
+  pin: "pin"
 };
 
 export default function CollectionPage() {
@@ -57,11 +72,9 @@ export default function CollectionPage() {
     return () => unsubscribe();
   }, [routeId]);
 
-  // 農園: stepDayでグループ化（stepDayなしは日付）
-  // ステップ: stepDayでグループ化
   const { gardenGroups, stepGroups } = useMemo(() => {
-    const gardenGroups: Record<string, AppleLog[]> = {};
-    const stepGroups: Record<string, AppleLog[]> = {};
+    const gGroups: Record<string, AppleLog[]> = {};
+    const sGroups: Record<string, AppleLog[]> = {};
 
     [...apples]
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -70,19 +83,18 @@ export default function CollectionPage() {
           const key = apple.stepDay != null
             ? `Day ${apple.stepDay}${apple.stepTitle ? `: ${apple.stepTitle}` : ""}`
             : "その他";
-          if (!stepGroups[key]) stepGroups[key] = [];
-          stepGroups[key].push(apple);
+          if (!sGroups[key]) sGroups[key] = [];
+          sGroups[key].push(apple);
         } else {
-          // 農園リンゴはstepDayがあればDay番号、なければ日付でグループ化
           const key = apple.stepDay != null
             ? `Day ${apple.stepDay}${apple.stepTitle ? ` (${apple.stepTitle})` : ""} の途中`
             : new Date(apple.createdAt).toLocaleDateString("ja-JP");
-          if (!gardenGroups[key]) gardenGroups[key] = [];
-          gardenGroups[key].push(apple);
+          if (!gGroups[key]) gGroups[key] = [];
+          gGroups[key].push(apple);
         }
       });
 
-    return { gardenGroups, stepGroups };
+    return { gardenGroups: gGroups, stepGroups: sGroups };
   }, [apples]);
 
   const sortByDay = (entries: [string, AppleLog[]][]) =>
@@ -104,6 +116,9 @@ export default function CollectionPage() {
     </div>
   );
 
+  // ★ 正しい画像パスを生成する関数
+  const getAppleSrc = (v: string) => `/images/${varietyToFileName[v] || v}.svg`;
+
   const AppleButton = ({ apple, isStep }: { apple: AppleLog; isStep: boolean }) => (
     <button
       key={apple.id}
@@ -114,7 +129,8 @@ export default function CollectionPage() {
           : "bg-stone-50 hover:bg-orange-50 hover:border-orange-200"
       }`}
     >
-      <img src={`/images/apple-${apple.variety}.svg`} alt={apple.variety} className="w-10 h-10 object-contain drop-shadow-md group-hover:scale-110 transition-transform" />
+      {/* 修正： apple.variety をそのまま使わず変換マップを通す */}
+      <img src={getAppleSrc(apple.variety)} alt={apple.variety} className="w-10 h-10 object-contain drop-shadow-md group-hover:scale-110 transition-transform" />
       <span className={`mt-1 text-[7px] font-black ${isStep ? "text-sky-300" : "text-stone-300"}`}>
         {new Date(apple.createdAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}
       </span>
@@ -149,8 +165,6 @@ export default function CollectionPage() {
       </header>
 
       <div className="max-w-2xl mx-auto space-y-10">
-
-        {/* 農園のリンゴ（Day別グループ） */}
         {gardenCount > 0 && (
           <section className="bg-white rounded-[32px] p-6 shadow-sm border border-stone-100">
             <div className="flex items-center gap-2 mb-6">
@@ -166,7 +180,6 @@ export default function CollectionPage() {
           </section>
         )}
 
-        {/* ステップのリンゴ（Day別グループ） */}
         {stepCount > 0 && (
           <section className="bg-white rounded-[32px] p-6 shadow-sm border border-stone-100">
             <div className="flex items-center gap-2 mb-6">
@@ -189,30 +202,28 @@ export default function CollectionPage() {
         )}
       </div>
 
-      {/* タイムカプセルモーダル */}
       {selectedApple && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.7)" }} onClick={() => {
-        setSelectedApple(null);
-        setShowShareForm(false);
-        setShareComment("");
-        setShared(false);
-          }}>
-          <div className="bg-white rounded-[40px] max-w-sm w-full overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-center h-40" style={{ backgroundColor: APPLE_COLORS[selectedApple.variety] + "22" }}>
-              <img src={`/images/apple-${selectedApple.variety}.svg`} alt={selectedApple.variety} className="w-28 h-28 object-contain drop-shadow-xl" />
+          setSelectedApple(null);
+          setShowShareForm(false);
+          setShareComment("");
+          setShared(false);
+        }}>
+          <div className="bg-white rounded-[40px] max-w-sm w-full overflow-hidden shadow-2xl animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-center h-40" style={{ backgroundColor: (APPLE_COLORS[selectedApple.variety] || "#e2e8f0") + "22" }}>
+              {/* 修正：画像パス変換を適用 */}
+              <img src={getAppleSrc(selectedApple.variety)} alt={selectedApple.variety} className="w-28 h-28 object-contain drop-shadow-xl" />
             </div>
             <div className="p-6">
               <div className="flex items-start justify-between mb-4">
                 <div>
-                  <h3 className="text-lg font-black text-stone-800">{APPLE_NAMES[selectedApple.variety]}</h3>
+                  <h3 className="text-lg font-black text-stone-800">{APPLE_NAMES[selectedApple.variety] || "特別なリンゴ"}</h3>
                   <p className="text-xs text-stone-400 font-bold mt-1">{new Date(selectedApple.createdAt).toLocaleString("ja-JP")}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
-                  {selectedApple.moodScore && (
-                    <div className="px-3 py-1 rounded-full text-xs font-black" style={{ backgroundColor: APPLE_COLORS[selectedApple.variety] + "22", color: APPLE_COLORS[selectedApple.variety] }}>
-                      Lv.{selectedApple.moodScore}
-                    </div>
-                  )}
+                  <div className="px-3 py-1 rounded-full text-xs font-black" style={{ backgroundColor: (APPLE_COLORS[selectedApple.variety] || "#e2e8f0") + "22", color: APPLE_COLORS[selectedApple.variety] }}>
+                    Lv.{selectedApple.moodScore}
+                  </div>
                   <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${selectedApple.source === 'step' ? 'bg-sky-50 text-sky-400 border border-sky-100' : 'bg-emerald-50 text-emerald-400 border border-emerald-100'}`}>
                     {selectedApple.source === 'step' ? '🗺️ ステップ' : '🌳 農園'}
                   </span>
@@ -221,12 +232,8 @@ export default function CollectionPage() {
 
               {selectedApple.stepDay != null && (
                 <div className="bg-sky-50 rounded-2xl p-3 mb-3 border border-sky-100">
-                  <p className="text-[9px] font-black text-sky-300 uppercase mb-1">
-                    {selectedApple.source === 'step' ? '完了ステップ' : '育てていた頃のステップ'}
-                  </p>
-                  <p className="text-sm text-sky-700 font-bold">
-                    Day {selectedApple.stepDay}{selectedApple.stepTitle ? `: ${selectedApple.stepTitle}` : ""}
-                  </p>
+                  <p className="text-[9px] font-black text-sky-300 uppercase mb-1">{selectedApple.source === 'step' ? '完了ステップ' : '育てていた頃のステップ'}</p>
+                  <p className="text-sm text-sky-700 font-bold">Day {selectedApple.stepDay}{selectedApple.stepTitle ? `: ${selectedApple.stepTitle}` : ""}</p>
                 </div>
               )}
               {selectedApple.note && (
@@ -237,91 +244,47 @@ export default function CollectionPage() {
               )}
               {selectedApple.comment && (
                 <div className="bg-orange-50 rounded-2xl p-4 mb-5 border border-orange-100">
-                  <p className="text-[9px] font-black text-orange-300 uppercase mb-2">
-                    {selectedApple.source === 'step' ? 'フィードバック' : '園主の言葉'}
-                  </p>
+                  <p className="text-[9px] font-black text-orange-300 uppercase mb-2">{selectedApple.source === 'step' ? 'フィードバック' : '園主の言葉'}</p>
                   <p className="text-sm text-stone-600 font-bold italic leading-relaxed">「{selectedApple.comment}」</p>
                 </div>
               )}
-              <button onClick={() => {
-                setSelectedApple(null);
-                setShowShareForm(false);
-                setShareComment("");
-                setShared(false);
-                }} className="w-full py-4 rounded-2xl font-black text-sm text-white" style={{ backgroundColor: APPLE_COLORS[selectedApple.variety] }}>
-                  閉じる
-                </button>
               
-              {/* 広場にシェア */}
-{!shared ? (
-  <div style={{marginBottom:"12px"}}>
-    {!showShareForm ? (
-      <button
-        onClick={() => setShowShareForm(true)}
-        style={{width:"100%",padding:"10px",borderRadius:"12px",border:"1.5px solid #e2e8f0",background:"#f8fafc",fontSize:"13px",fontWeight:700,color:"#64748b",cursor:"pointer"}}
-      >
-        🐝 直売所にシェアする
-      </button>
-    ) : (
-      <div style={{background:"#f8fafc",borderRadius:"12px",padding:"12px",border:"1px solid #e2e8f0",marginBottom:"8px"}}>
-        <p style={{fontSize:"11px",fontWeight:700,color:"#94a3b8",marginBottom:"6px"}}>一言コメント（任意）</p>
-        <textarea
-          placeholder="このリンゴについて一言..."
-          value={shareComment}
-          onChange={e => setShareComment(e.target.value)}
-          style={{width:"100%",padding:"8px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"12px",resize:"none",height:"56px",marginBottom:"8px",boxSizing:"border-box" as any}}
-        />
-        <div style={{display:"flex",gap:"8px"}}>
-          <button
-            onClick={() => setShowShareForm(false)}
-            style={{flex:1,padding:"8px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"12px",cursor:"pointer",background:"white"}}
-          >
-            キャンセル
-          </button>
-          <button
-            onClick={async () => {
-              if (!selectedApple) return;
-              setSharing(true);
-              try {
-                await fetch("/api/share-to-orchard", {
-                  method:"POST",
-                  headers:{"Content-Type":"application/json"},
-                  body: JSON.stringify({
-                    userId,
-                    routeId: selectedApple.routeId,
-                    goal: routeName,
-                    comment: shareComment,
-                    variety: selectedApple.variety,
-                    note: selectedApple.note,
-                    source: "collection",
-                    moodScore: selectedApple.moodScore,
-                    stepDay: selectedApple.stepDay,
-                    stepTitle: selectedApple.stepTitle,
-                  }),
-                });
-                setShared(true);
-                setShowShareForm(false);
-              } catch(e) { console.error(e); } finally { setSharing(false); }
-            }}
-            style={{flex:2,padding:"8px",borderRadius:"8px",background:"#3b82f6",color:"white",fontWeight:700,fontSize:"12px",border:"none",cursor:"pointer"}}
-          >
-            {sharing ? "投稿中..." : "投稿する 🐝"}
-          </button>
-        </div>
-      </div>
-    )}
-  </div>
-) : (
-  <div style={{marginBottom:"12px",textAlign:"center",padding:"10px",background:"#f0fdf4",borderRadius:"12px",border:"1px solid #86efac"}}>
-    <span style={{fontSize:"13px",fontWeight:700,color:"#16a34a"}}>🎉 広場に投稿しました！</span>
-  </div>
-)}
+              {!shared ? (
+                <div style={{marginBottom:"12px"}}>
+                  {!showShareForm ? (
+                    <button onClick={() => setShowShareForm(true)} style={{width:"100%",padding:"14px",borderRadius:"16px",border:"1.5px solid #e2e8f0",background:"#f8fafc",fontSize:"13px",fontWeight:700,color:"#64748b",cursor:"pointer"}}>🐝 直売所にシェアする</button>
+                  ) : (
+                    <div style={{background:"#f8fafc",borderRadius:"12px",padding:"12px",border:"1px solid #e2e8f0",marginBottom:"8px"}}>
+                      <p style={{fontSize:"11px",fontWeight:700,color:"#94a3b8",marginBottom:"6px"}}>一言コメント（任意）</p>
+                      <textarea placeholder="このリンゴについて一言..." value={shareComment} onChange={e => setShareComment(e.target.value)} style={{width:"100%",padding:"8px",borderRadius:"8px",border:"1px solid #e2e8f0",fontSize:"12px",resize:"none",height:"56px",marginBottom:"8px",boxSizing:"border-box"}} />
+                      <div style={{display:"flex",gap:"8px"}}>
+                        <button onClick={() => setShowShareForm(false)} style={{flex:1,padding:"8px",borderRadius:"8px",border:"1.5px solid #e2e8f0",fontSize:"12px",cursor:"pointer",background:"white"}}>戻る</button>
+                        <button onClick={async () => {
+                            if (!selectedApple) return;
+                            setSharing(true);
+                            try {
+                              await fetch("/api/share-to-orchard", {
+                                method:"POST",
+                                headers:{"Content-Type":"application/json"},
+                                body: JSON.stringify({ userId, routeId: selectedApple.routeId, goal: routeName, comment: shareComment, variety: selectedApple.variety, note: selectedApple.note, source: "collection", moodScore: selectedApple.moodScore, stepDay: selectedApple.stepDay, stepTitle: selectedApple.stepTitle }),
+                              });
+                              setShared(true);
+                              setShowShareForm(false);
+                            } catch(e) { console.error(e); } finally { setSharing(false); }
+                        }} style={{flex:2,padding:"8px",borderRadius:"8px",background:"#3b82f6",color:"white",fontWeight:700,fontSize:"12px",border:"none",cursor:"pointer"}}>{sharing ? "投稿中..." : "投稿する 🐝"}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{marginBottom:"12px",textAlign:"center",padding:"10px",background:"#f0fdf4",borderRadius:"12px",border:"1px solid #86efac"}}><span style={{fontSize:"13px",fontWeight:700,color:"#16a34a"}}>🎉 広場に投稿しました！</span></div>
+              )}
+              
+              <button onClick={() => { setSelectedApple(null); setShowShareForm(false); setShared(false); }} className="w-full py-4 rounded-2xl font-black text-sm text-white transition hover:opacity-90" style={{ backgroundColor: APPLE_COLORS[selectedApple.variety] || "#10b981" }}>閉じる</button>
             </div>
           </div>
         </div>
       )}
-
-  
 
       <footer className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-white/90 backdrop-blur-md p-4 rounded-full shadow-2xl border border-white/50 flex justify-around items-center z-40">
         <Link href={`/garden/${routeId}`} className="flex flex-col items-center gap-1 hover:opacity-70 transition-opacity">

@@ -1,11 +1,12 @@
 "use client";
-import Apple, { AppleVariety } from "./Apple"; // AppleVarietyをインポート
+import Apple from "./Apple";
+import { AppleVariety } from "@/lib/apple"; // 型をインポート
 import { useState, useEffect } from "react";
 
 type AppleTreeProps = {
-  level: number;      // 0:苗, 1:成長, 2:木
-  isPlanted: boolean; // ビッグツリー状態
-  variety: AppleVariety; // ★12種類すべてを受け入れ可能に
+  level: number;
+  isPlanted: boolean;
+  variety: AppleVariety; // ★12種類を受け入れ
   hasApple: boolean;
   moodScore: number;
 };
@@ -13,7 +14,7 @@ type AppleTreeProps = {
 export default function AppleTree({ level, isPlanted, variety, hasApple, moodScore }: AppleTreeProps) {
   const [imgError, setImgError] = useState(false);
 
-  // 伝説の果実かどうかを判定
+  // 伝説の果実（ビッグツリー限定）のリスト
   const isLegendary = ['sakura', 'nashi', 'suika', 'pin'].includes(variety);
 
   const getImagePath = () => {
@@ -27,24 +28,21 @@ export default function AppleTree({ level, isPlanted, variety, hasApple, moodSco
 
   useEffect(() => {
     setImgError(false);
-  }, [level, isPlanted]);
+  }, [level, isPlanted, variety]); // varietyが変わった時も再チェック
 
   return (
     <div className="relative flex flex-col items-center justify-center w-80 h-80">
       
-      {/* ★ 演出：大地に植わった、または伝説の果実がある時のキラキラ */}
+      {/* 演出エフェクト */}
       {(isPlanted || isLegendary) && (
         <div className="absolute inset-0 pointer-events-none z-0">
-          {/* 伝説の果実の時は少し色が豪華になる */}
           <div className={`absolute inset-0 animate-pulse blur-3xl rounded-full ${
             isLegendary ? "bg-orange-200/20" : "bg-yellow-200/10"
           }`} />
           {[...Array(isLegendary ? 10 : 6)].map((_, i) => (
             <span
               key={i}
-              className={`absolute animate-ping opacity-60 ${
-                isLegendary ? "text-orange-300" : "text-yellow-400"
-              }`}
+              className={`absolute animate-ping opacity-60 ${isLegendary ? "text-orange-300" : "text-yellow-400"}`}
               style={{
                 top: `${Math.random() * 80}%`,
                 left: `${Math.random() * 80}%`,
@@ -59,26 +57,25 @@ export default function AppleTree({ level, isPlanted, variety, hasApple, moodSco
       )}
 
       {/* 木の本体 */}
-      <div className="z-10 flex items-center justify-center transition-all duration-1000 ease-in-out">
+      <div className="z-10 flex items-center justify-center transition-all duration-1000">
         {!imgError ? (
           <img 
             src={treeImagePath} 
-            alt="Growth Status" 
+            alt="Tree" 
             className={`object-contain transition-all duration-700 ${
               isPlanted ? "w-72 h-72 translate-y-2" : "w-64 h-64"
-            } ${isLegendary && isPlanted ? "brightness-110 drop-shadow-[0_0_15px_rgba(255,223,0,0.3)]" : ""}`}
+            } ${isLegendary && isPlanted ? "brightness-110 drop-shadow-[0_0_15px_rgba(255,223,0,0.2)]" : ""}`}
             onError={() => setImgError(true)}
           />
         ) : (
-          <div className="text-8xl animate-bounce">
-            {isPlanted ? "🌳" : level === 0 ? "🌱" : level === 1 ? "🎋" : "🪴"}
-          </div>
+          <div className="text-8xl animate-bounce">🌳</div>
         )}
       </div>
 
-      {/* リンゴの実 */}
+      {/* りんごの実：判定がここでされます */}
       {(isPlanted || level >= 2) && hasApple && (
         <div className="absolute top-12 z-20 animate-bounce">
+           {/* varietyが正しく渡っていれば、ここで画像が表示されます */}
            <Apple variety={variety} moodScore={moodScore} />
         </div>
       )}

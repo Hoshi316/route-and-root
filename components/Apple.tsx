@@ -1,38 +1,30 @@
 "use client";
 
-// 12種類すべての品種を型定義に追加
-export type AppleVariety = 
-  | 'red' | 'pink' | 'blue' | 'green' | 'yellow' | 'orange' | 'purple' | 'gold' // 通常
-  | 'sakura' | 'nashi' | 'suika' | 'pin'; // 伝説
+import { AppleVariety } from "@/lib/apple";
 
 type Props = {
   variety: AppleVariety;
-  moodScore: number; // 1〜5
+  moodScore: number;
 };
 
 export default function Apple({ variety, moodScore }: Props) {
-  // サイズ定義（仕様通り）
+  // 1. サイズマップ
   const sizeMap: Record<number, number> = {
-    1: 60,
-    2: 75,
-    3: 90,
-    4: 105,
-    5: 120
+    1: 60, 2: 75, 3: 90, 4: 105, 5: 120
   };
 
-  // 品種名（APIの返り値）から 実際の画像ファイル名 への変換マップ
-  const fileMap: Record<AppleVariety, string> = {
-    // 通常品種
-    red: "apple-sun",      // 赤は既存のsunを使用
-    pink: "pink",          // 追加されたpink.svg
-    blue: "blue",          // 追加されたblue.svg
-    green: "apple-forest", // 緑は既存のforestを使用
-    yellow: "yellow",      // 追加されたyellow.svg
-    orange: "orange",      // 追加されたorange.svg
-    purple: "apple-midnight", // 紫は既存のmidnightを使用
-    gold: "apple-rare",    // ゴールドは既存のrareを使用
-    
-    // 伝説品種
+  // 2. ★超重要：内部名と実際のファイル名のズレをここで吸収する
+  const fileMap: Record<string, string> = {
+    // 以前の品種名
+    red: "apple-sun",
+    green: "apple-forest",
+    purple: "apple-midnight",
+    gold: "apple-rare",
+    // 新しい品種名（ファイル名と一致しているもの）
+    pink: "pink",
+    blue: "blue",
+    yellow: "yellow",
+    orange: "orange",
     sakura: "sakura",
     nashi: "nashi",
     suika: "suika",
@@ -46,7 +38,7 @@ export default function Apple({ variety, moodScore }: Props) {
     <img 
       src={`/images/${fileName}.svg`} 
       alt={variety} 
-      style={{ width: `${size}px`, height: 'auto' }}
+      style={{ width: `${size}px`, height: "auto" }}
       className="drop-shadow-xl animate-bounce-slow"
     />
   );
