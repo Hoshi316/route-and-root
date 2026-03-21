@@ -177,6 +177,8 @@ export default function MissionMap({ routeId, goal, summary, progress, steps, ph
   const [openPhases, setOpenPhases] = useState<Set<number>>(() => {
     if (!phases || phases.length === 0) return new Set([0]);
     const completedDays = sortedAsc.filter(s => s.done).map(s => s.scheduledDay);
+    const [showAbandonModal, setShowAbandonModal] = useState(false);
+    const [abandonReason, setAbandonReason] = useState("");
     const maxCompletedDay = completedDays.length > 0 ? Math.max(...completedDays) : 0;
     const currentPhaseIndex = phases.findIndex(
       p => maxCompletedDay >= p.startDay && maxCompletedDay <= p.endDay
